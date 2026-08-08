@@ -123,3 +123,45 @@ def test_websocket_odd_length_audio_chunks():
         websocket.send_bytes(bytes(3200))
         res2 = websocket.receive_json()
         assert "text" in res2
+
+
+def test_websocket_ping_pong_keepalive():
+    """
+    Test ping/pong keepalive messages during WebSocket session.
+    """
+    with client.websocket_connect("/transcribe") as websocket:
+        # Send ping
+        websocket.send_json({"type": "ping"})
+        res = websocket.receive_json()
+        assert res == {"type": "pong"}
+
+        # Send pong back to server (ignored gracefully)
+        websocket.send_json({"type": "pong"})
+
+        # Follow up with audio stream
+        websocket.send_bytes(bytes(3200))
+        res2 = websocket.receive_json()
+        assert "text" in res2
+
+
+def test_websocket_abrupt_disconnect_mid_stream():
+    """
+    Test server resilience and clean resource shutdown on abrupt WebSocket disconnect mid-stream.
+    """
+    ws = client.websocket_connect("/transcribe")
+    websocket = ws.__enter__()
+    websocket.send_json({"type": "config", "language": "en"})
+    websocket.send_bytes(bytes(3200))
+    # Close connection abruptly mid-stream without explicit disconnect handshake
+    ws.__exit__(None, None, None)
+
+
+def test_websocket_idle_timeout_keepalive(monkeypatch):
+    """
+    Test server sending periodic ping frame when client is idle.
+    """
+    monkeypatch.setattr("server.main.KEEPALIVE_TIMEOUT_SECONDS", 0.1)
+    with client.websocket_connect("/transcribe") as websocket:
+        # Client stays idle; server should send keepalive ping after timeout
+        msg = websocket.receive_json()
+        assert msg == {"type": "ping"}

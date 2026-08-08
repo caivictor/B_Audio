@@ -1,15 +1,29 @@
 let isCapturing = false;
 let currentLanguage = 'es';
+let currentFontSize = 24;
 let currentTabId = null;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'getStatus') {
-    sendResponse({ isCapturing, language: currentLanguage, tabId: currentTabId });
+    sendResponse({ isCapturing, language: currentLanguage, fontSize: currentFontSize, tabId: currentTabId });
+    return true;
+  }
+
+  if (message.action === 'updateConfig') {
+    if (message.fontSize) currentFontSize = message.fontSize;
+    if (message.language) currentLanguage = message.language;
+    chrome.runtime.sendMessage({
+      action: 'updateConfig',
+      fontSize: currentFontSize,
+      language: currentLanguage
+    }).catch(() => {});
+    sendResponse({ success: true });
     return true;
   }
 
   if (message.action === 'start') {
     currentLanguage = message.language || 'es';
+    currentFontSize = message.fontSize || 24;
     currentTabId = message.tabId;
 
     chrome.tabCapture.getMediaStreamId({ targetTabId: currentTabId }, async (streamId) => {
@@ -44,7 +58,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.runtime.sendMessage({
           action: 'startCapture',
           streamId,
-          language: currentLanguage
+          language: currentLanguage,
+          fontSize: currentFontSize
         });
 
         isCapturing = true;
