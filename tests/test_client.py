@@ -21,23 +21,113 @@ def qapp():
 
 
 def test_overlay_window_flags_and_properties(qapp):
-    """Verify overlay window has required transparent, frameless, always-on-top and click-through flags."""
+    """Verify overlay window has required transparent, frameless and always-on-top flags."""
     overlay = TransparentOverlayWindow(initial_text="Testing Subtitle")
 
     # Verify Translucent Background attribute
     assert overlay.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) is True
 
-    # Verify Window Flags
+    # Verify Window Flags (Frameless, Always-On-Top)
     flags = overlay.windowFlags()
     assert bool(flags & Qt.WindowType.FramelessWindowHint) is True
     assert bool(flags & Qt.WindowType.WindowStaysOnTopHint) is True
-    assert bool(flags & Qt.WindowType.WindowTransparentForInput) is True
 
     # Verify label text setting
     assert overlay.label.text() == "Testing Subtitle"
 
     overlay.set_caption_text("Updated Caption")
     assert overlay.label.text() == "Updated Caption"
+
+
+def test_overlay_draggable(qapp):
+    """Verify overlay window handles mousePressEvent and mouseMoveEvent for dragging (Phase 2)."""
+    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtCore import QPointF
+
+    overlay = TransparentOverlayWindow(initial_text="Draggable Test")
+    overlay.show()
+    initial_pos = overlay.pos()
+
+    # Simulate Left Mouse Press at (10, 10)
+    press_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(10.0, 10.0),
+        QPointF(initial_pos.x() + 10.0, initial_pos.y() + 10.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier
+    )
+    overlay.mousePressEvent(press_event)
+    assert overlay._drag_position is not None
+
+    # Simulate Left Mouse Move to (60, 60)
+    move_event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(60.0, 60.0),
+        QPointF(initial_pos.x() + 60.0, initial_pos.y() + 60.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier
+    )
+    overlay.mouseMoveEvent(move_event)
+    assert overlay._user_dragged is True
+    assert overlay.pos() != initial_pos
+
+    # Simulate Release
+    release_event = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        QPointF(60.0, 60.0),
+        QPointF(initial_pos.x() + 60.0, initial_pos.y() + 60.0),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier
+    )
+    overlay.mouseReleaseEvent(release_event)
+    assert overlay._drag_position is None
+
+
+def test_overlay_font_size_control(qapp):
+    """Verify set_font_size dynamically updates overlay font size and window layout."""
+    overlay = TransparentOverlayWindow(initial_text="Font Size Test", font_size=24)
+    assert overlay.font_size == 24
+
+    overlay.set_font_size(32)
+    assert overlay.font_size == 32
+    assert "32px" in overlay.label.styleSheet()
+
+
+@pytest.mark.asyncio
+async def test_relay_server_font_size_config():
+    """Verify RelayServer parses fontSize config JSON and emits font_size_changed signal."""
+    import websockets
+
+    received_font_sizes = []
+    bridge = CaptionSignalBridge()
+    bridge.font_size_changed.connect(received_font_sizes.append)
+
+    mock_port = get_free_port()
+    relay_port = get_free_port()
+
+    mock_stt = await run_mock_stt_server(host="127.0.0.1", port=mock_port)
+    relay = RelayServer(
+        host="127.0.0.1",
+        port=relay_port,
+        remote_url=f"ws://127.0.0.1:{mock_port}/transcribe",
+        signal_bridge=bridge
+    )
+    await relay.start_server()
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{relay_port}") as ext_ws:
+            config = json.dumps({"type": "config", "language": "es", "fontSize": 32})
+            await ext_ws.send(config)
+            await asyncio.sleep(0.2)
+
+            assert 32 in received_font_sizes
+    finally:
+        mock_stt.close()
+        await mock_stt.wait_closed()
+        await relay.stop()
 
 
 def test_caption_signal_bridge(qapp):

@@ -14,9 +14,9 @@ import threading
 import argparse
 from typing import Optional
 
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QGraphicsDropShadowEffect
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QGraphicsDropShadowEffect, QStyleOption, QStyle
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QRect
-from PyQt6.QtGui import QColor, QFont, QGuiApplication
+from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QMouseEvent
 
 import websockets
 
@@ -32,25 +32,88 @@ class CaptionSignalBridge(QObject):
     """Signal bridge to pass messages safely from asyncio background thread to PyQt UI main thread."""
     text_received = pyqtSignal(str)
     status_changed = pyqtSignal(str)
+    font_size_changed = pyqtSignal(int)
+
+
+class StrokedLabel(QLabel):
+    """
+    QLabel subclass that renders text with a dark outline (stroke)
+    around white text to ensure readability on bright/light backgrounds.
+    """
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None):
+        super().__init__(text, parent)
+        self._stroke_color = QColor(0, 0, 0, 255)
+        self._stroke_width = 2
+        self._text_color = QColor(255, 255, 255, 255)
+
+    def set_stroke_width(self, width: int):
+        self._stroke_width = width
+        self.update()
+
+    def set_stroke_color(self, color: QColor):
+        self._stroke_color = color
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        opt = QStyleOption()
+        opt.initFrom(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
+
+        text = self.text()
+        if not text:
+            return
+
+        rect = self.contentsRect()
+        alignment = self.alignment()
+        painter.setFont(self.font())
+
+        w = self._stroke_width
+        if w > 0:
+            painter.setPen(self._stroke_color)
+            for dx in range(-w, w + 1):
+                for dy in range(-w, w + 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if dx*dx + dy*dy <= (w + 0.5) ** 2:
+                        painter.drawText(
+                            rect.translated(dx, dy),
+                            alignment | Qt.TextFlag.TextWordWrap,
+                            text
+                        )
+
+        painter.setPen(self._text_color)
+        painter.drawText(
+            rect,
+            alignment | Qt.TextFlag.TextWordWrap,
+            text
+        )
 
 
 class TransparentOverlayWindow(QWidget):
     """
-    Frameless, transparent, always-on-top, click-through overlay window
+    Frameless, transparent, always-on-top overlay window
     for rendering real-time speech captions on screen.
+    Draggable using mouse press and move events.
     """
 
-    def __init__(self, initial_text: Optional[str] = None):
+    def __init__(self, initial_text: Optional[str] = None, font_size: int = 24):
         super().__init__()
+
+        # Draggable state tracking
+        self._drag_position = None
+        self._user_dragged = False
+        self.font_size = font_size
 
         # Enable translucent background
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
-        # Set window flags: Frameless, Always-On-Top, Click-Through, Tool window
+        # Set window flags: Frameless, Always-On-Top, Tool window (Removed WindowTransparentForInput to allow dragging)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.WindowTransparentForInput |
             Qt.WindowType.Tool
         )
 
@@ -67,7 +130,7 @@ class TransparentOverlayWindow(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
 
         text_to_display = initial_text if initial_text is not None else "WebCaptioner Ready"
-        self.label = QLabel(text_to_display)
+        self.label = StrokedLabel(text_to_display)
         self.label.setTextFormat(Qt.TextFormat.PlainText)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setWordWrap(True)
@@ -76,18 +139,7 @@ class TransparentOverlayWindow(QWidget):
             self.label.setVisible(False)
 
         # Style sheet for high contrast subtitle look
-        self.label.setStyleSheet("""
-            QLabel {
-                background-color: rgba(18, 18, 24, 0.82);
-                color: #FFFFFF;
-                border-radius: 12px;
-                padding: 16px 24px;
-                font-family: 'Segoe UI', 'Ubuntu', 'Helvetica Neue', sans-serif;
-                font-size: 24px;
-                font-weight: bold;
-                border: 1px solid rgba(255, 255, 255, 0.18);
-            }
-        """)
+        self._apply_label_style(self.font_size)
 
         # Add drop shadow for high contrast on light backgrounds
         shadow = QGraphicsDropShadowEffect(self)
@@ -98,6 +150,54 @@ class TransparentOverlayWindow(QWidget):
 
         layout.addWidget(self.label)
         self.setLayout(layout)
+
+    def _apply_label_style(self, size: int):
+        self.label.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(18, 18, 24, 0.82);
+                color: #FFFFFF;
+                border-radius: 12px;
+                padding: 16px 24px;
+                font-family: 'Segoe UI', 'Ubuntu', 'Helvetica Neue', sans-serif;
+                font-size: {size}px;
+                font-weight: bold;
+                border: 1px solid rgba(255, 255, 255, 0.18);
+            }}
+        """)
+        font = self.label.font()
+        font.setPointSize(size)
+        self.label.setFont(font)
+
+    def set_font_size(self, size: int):
+        """Dynamically update font size of overlay text."""
+        try:
+            size = int(size)
+            if size < 12 or size > 72:
+                return
+        except (ValueError, TypeError):
+            return
+        self.font_size = size
+        self._apply_label_style(size)
+        self._update_geometry()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Capture drag start position when left mouse button is pressed."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Move window position when left mouse button is dragged."""
+        if event.buttons() & Qt.MouseButton.LeftButton and self._drag_position is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_position)
+            self._user_dragged = True
+            event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Release drag state on mouse release."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_position = None
+            event.accept()
 
     def _position_window(self):
         """Position window at bottom center of the primary screen with dynamic height support."""
@@ -111,14 +211,15 @@ class TransparentOverlayWindow(QWidget):
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_geom = screen.availableGeometry()
-            width = int(screen_geom.width() * 0.75)
-            x = screen_geom.x() + (screen_geom.width() - width) // 2
+            default_width = int(screen_geom.width() * 0.75)
+            default_x = screen_geom.x() + (screen_geom.width() - default_width) // 2
             screen_bottom = screen_geom.y() + screen_geom.height()
         else:
-            width = 1000
-            x = 100
+            default_width = 1000
+            default_x = 100
             screen_bottom = 800
 
+        width = self.width() if self._user_dragged else default_width
         self.setFixedWidth(width)
 
         if not self.label.isHidden() and self.label.text():
@@ -133,8 +234,9 @@ class TransparentOverlayWindow(QWidget):
             req_height = max(140, self.sizeHint().height())
 
         self.setFixedHeight(req_height)
-        y = screen_bottom - req_height - 60
-        self.setGeometry(QRect(x, y, width, req_height))
+        if not self._user_dragged:
+            y = screen_bottom - req_height - 60
+            self.setGeometry(QRect(default_x, y, default_width, req_height))
 
     def set_caption_text(self, text: str):
         """Update caption label and restart clear timer."""
@@ -150,6 +252,10 @@ class TransparentOverlayWindow(QWidget):
     def set_status_text(self, status: str):
         """Display status or connection message."""
         logger.info("Status update: %s", status)
+        if any(keyword in status.lower() for keyword in ["error", "disconnected", "reconnecting", "unavailable", "failed"]):
+            self.label.setText(f"[{status}]")
+            self.label.setVisible(True)
+            self._update_geometry()
 
     def _clear_caption(self):
         """Clear overlay caption when silent and hide label background box."""
@@ -197,18 +303,36 @@ class RelayServer:
             config_msg = await websocket.recv()
             logger.info("Received config message: %s", config_msg)
 
-            # 2. Connect to Remote STT server
             try:
-                remote_ws = await websockets.connect(self.remote_url)
-                logger.info("Connected to remote STT server at %s", self.remote_url)
-                if self.signal_bridge:
-                    self.signal_bridge.status_changed.emit("Connected to STT server. Audio streaming active.")
-            except Exception as exc:
-                logger.error("Failed to connect to remote STT server at %s: %s", self.remote_url, exc)
-                disconnect_reason = f"Error connecting to STT server: {exc}"
-                if self.signal_bridge:
-                    self.signal_bridge.status_changed.emit(disconnect_reason)
-                return
+                config_data = json.loads(config_msg)
+                if isinstance(config_data, dict) and "fontSize" in config_data:
+                    font_size = int(config_data["fontSize"])
+                    if self.signal_bridge:
+                        self.signal_bridge.font_size_changed.emit(font_size)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+            # 2. Connect to Remote STT server (with auto-retry resilience)
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    remote_ws = await websockets.connect(self.remote_url)
+                    logger.info("Connected to remote STT server at %s", self.remote_url)
+                    if self.signal_bridge:
+                        self.signal_bridge.status_changed.emit("Connected to STT server. Audio streaming active.")
+                    break
+                except Exception as exc:
+                    logger.warning("Attempt %d/%d to connect to STT server at %s failed: %s", attempt, max_retries, self.remote_url, exc)
+                    if attempt < max_retries:
+                        if self.signal_bridge:
+                            self.signal_bridge.status_changed.emit(f"STT Server offline. Retrying... ({attempt}/{max_retries})")
+                        await asyncio.sleep(1.0)
+                    else:
+                        logger.error("Failed to connect to remote STT server at %s after %d attempts: %s", self.remote_url, max_retries, exc)
+                        disconnect_reason = f"Error connecting to STT server: {exc}"
+                        if self.signal_bridge:
+                            self.signal_bridge.status_changed.emit(disconnect_reason)
+                        return
 
             # 3. Forward config message to Remote STT server
             await remote_ws.send(config_msg)
@@ -218,6 +342,15 @@ class RelayServer:
                 nonlocal disconnect_reason
                 try:
                     async for message in websocket:
+                        if isinstance(message, str):
+                            try:
+                                data = json.loads(message)
+                                if isinstance(data, dict) and "fontSize" in data:
+                                    font_size = int(data["fontSize"])
+                                    if self.signal_bridge:
+                                        self.signal_bridge.font_size_changed.emit(font_size)
+                            except (json.JSONDecodeError, TypeError, ValueError):
+                                pass
                         await remote_ws.send(message)
                     disconnect_reason = "Disconnected from extension."
                 except websockets.exceptions.ConnectionClosed:
@@ -356,6 +489,7 @@ def main():
     overlay = TransparentOverlayWindow(initial_text=args.text)
     bridge.text_received.connect(overlay.set_caption_text)
     bridge.status_changed.connect(overlay.set_status_text)
+    bridge.font_size_changed.connect(overlay.set_font_size)
     overlay.show()
 
     # Optionally start local mock STT server for testing

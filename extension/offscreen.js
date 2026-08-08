@@ -3,6 +3,11 @@ let mediaStream = null;
 let audioContext = null;
 let processorNode = null;
 let pcmBuffer = [];
+let currentLanguage = 'es';
+let currentFontSize = 24;
+let isReconnecting = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
 const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_DURATION_SEC = 1.0;
 const SAMPLES_PER_CHUNK = TARGET_SAMPLE_RATE * CHUNK_DURATION_SEC; // 16000 samples = 1 sec
@@ -12,9 +17,19 @@ chrome.runtime.sendMessage({ action: 'offscreenReady' });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'startCapture') {
-    startCapture(message.streamId, message.language);
+    startCapture(message.streamId, message.language, message.fontSize);
   } else if (message.action === 'stopCapture') {
     stopCapture();
+  } else if (message.action === 'updateConfig') {
+    if (message.language) currentLanguage = message.language;
+    if (message.fontSize) currentFontSize = message.fontSize;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'config',
+        language: currentLanguage,
+        fontSize: currentFontSize
+      }));
+    }
   }
 });
 
@@ -26,8 +41,10 @@ function handleWsDisconnect(errorMsg) {
   });
 }
 
-async function startCapture(streamId, language) {
+async function startCapture(streamId, language, fontSize) {
   stopCapture(); // Clean up any existing capture session
+  currentLanguage = language || 'es';
+  currentFontSize = fontSize || 24;
 
   try {
     // 1. Obtain MediaStream from Chrome tab capture streamId FIRST (DEF-007)
@@ -43,26 +60,7 @@ async function startCapture(streamId, language) {
 
     // 2. Connect WebSocket to local client only after media stream is acquired
     ws = new WebSocket('ws://localhost:8765');
-
-    ws.onopen = () => {
-      console.log('WebSocket connected to local client.');
-      // Send initial config message
-      const config = {
-        type: 'config',
-        language: language || 'es'
-      };
-      ws.send(JSON.stringify(config));
-    };
-
-    ws.onerror = (err) => {
-      console.error('WebSocket error:', err);
-      handleWsDisconnect('WebSocket connection error');
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket connection closed.');
-      handleWsDisconnect('WebSocket connection closed');
-    };
+    setupWebSocketHandlers();
 
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const source = audioContext.createMediaStreamSource(mediaStream);
@@ -115,6 +113,44 @@ async function startCapture(streamId, language) {
       error: err.message || 'Failed to start audio capture'
     });
   }
+}
+
+function setupWebSocketHandlers() {
+  if (!ws) return;
+
+  ws.onopen = () => {
+    console.log('WebSocket connected to local client.');
+    reconnectAttempts = 0;
+    isReconnecting = false;
+    // Send initial config message
+    const config = {
+      type: 'config',
+      language: currentLanguage,
+      fontSize: currentFontSize
+    };
+    ws.send(JSON.stringify(config));
+  };
+
+  ws.onerror = (err) => {
+    console.error('WebSocket error:', err);
+  };
+
+  ws.onclose = () => {
+    console.log('WebSocket connection closed.');
+    if (mediaStream && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+      reconnectAttempts++;
+      isReconnecting = true;
+      console.log(`Attempting WebSocket reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
+      setTimeout(() => {
+        if (mediaStream) {
+          ws = new WebSocket('ws://localhost:8765');
+          setupWebSocketHandlers();
+        }
+      }, 1000);
+    } else {
+      handleWsDisconnect('WebSocket connection closed');
+    }
+  };
 }
 
 function sendPcmChunk() {

@@ -72,3 +72,18 @@ def test_extension_background_and_popup_event_driven_handling():
 
     # Verify popup.js listens for captureStopped
     assert "captureStopped" in popup_code
+
+
+def test_extension_font_size_controls():
+    """Verify extension popup, background, and offscreen JS support dynamic font size control."""
+    popup_html = Path("extension/popup.html").read_text(encoding="utf-8")
+    popup_js = Path("extension/popup.js").read_text(encoding="utf-8")
+    bg_js = Path("extension/background.js").read_text(encoding="utf-8")
+    offscreen_js = Path("extension/offscreen.js").read_text(encoding="utf-8")
+
+    assert "fontSizeSelect" in popup_html, "popup.html must contain fontSizeSelect element"
+    assert "fontSizeSelect" in popup_js, "popup.js must bind to fontSizeSelect"
+    assert "updateConfig" in popup_js, "popup.js must send updateConfig message on font size change"
+    assert "currentFontSize" in bg_js, "background.js must maintain currentFontSize"
+    assert "updateConfig" in bg_js, "background.js must handle updateConfig message"
+    assert "currentFontSize" in offscreen_js, "offscreen.js must handle fontSize config"
