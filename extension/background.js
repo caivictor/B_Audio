@@ -1,0 +1,89 @@
+let isCapturing = false;
+let currentLanguage = 'es';
+let currentTabId = null;
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'getStatus') {
+    sendResponse({ isCapturing, language: currentLanguage, tabId: currentTabId });
+    return true;
+  }
+
+  if (message.action === 'start') {
+    currentLanguage = message.language || 'es';
+    currentTabId = message.tabId;
+
+    chrome.tabCapture.getMediaStreamId({ targetTabId: currentTabId }, async (streamId) => {
+      if (chrome.runtime.lastError || !streamId) {
+        console.error('Failed to get media stream ID:', chrome.runtime.lastError);
+        sendResponse({ success: false, error: chrome.runtime.lastError?.message });
+        return;
+      }
+
+      try {
+        const hasDoc = await chrome.offscreen.hasDocument();
+        if (!hasDoc) {
+          let resolveReady;
+          const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+          const readyListener = (msg) => {
+            if (msg.action === 'offscreenReady') {
+              chrome.runtime.onMessage.removeListener(readyListener);
+              resolveReady();
+            }
+          };
+          chrome.runtime.onMessage.addListener(readyListener);
+
+          await chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: ['USER_MEDIA'],
+            justification: 'Capture tab audio for real-time transcription'
+          });
+
+          await readyPromise;
+        }
+
+        chrome.runtime.sendMessage({
+          action: 'startCapture',
+          streamId,
+          language: currentLanguage
+        });
+
+        isCapturing = true;
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error('Error creating offscreen document:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    });
+
+    return true; // Keep sendResponse open for async handler
+  }
+
+  if (message.action === 'stop') {
+    isCapturing = false;
+    chrome.runtime.sendMessage({ action: 'stopCapture' });
+
+    chrome.offscreen.hasDocument().then((hasDoc) => {
+      if (hasDoc) {
+        chrome.offscreen.closeDocument().catch((err) => {
+          console.error('Error closing offscreen document:', err);
+        });
+      }
+    });
+
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.action === 'captureStopped') {
+    isCapturing = false;
+    chrome.offscreen.hasDocument().then((hasDoc) => {
+      if (hasDoc) {
+        chrome.offscreen.closeDocument().catch((err) => {
+          console.error('Error closing offscreen document:', err);
+        });
+      }
+    });
+    // Broadcast captureStopped to update popup UI
+    chrome.runtime.sendMessage(message).catch(() => {});
+  }
+});

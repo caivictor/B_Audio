@@ -1,0 +1,250 @@
+## DEF-012: Overlay window displays empty dark background box during silence after clearing text
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: adversary (ADV-010)
+- Phase: 1
+
+Steps to reproduce:
+1. Launch `client/main.py` transparent overlay window with active caption displayed.
+2. Wait for 10-second silence timer `_clear_caption()` to trigger.
+3. Observe overlay window appearance on screen.
+
+Expected: Overlay window becomes completely transparent or hidden during silence.
+Actual: `_clear_caption()` sets `label.setText("")`, but `QLabel` stylesheet padding and background (`rgba(18, 18, 24, 0.82)`) remain visible as a dark empty box floating on screen.
+Screenshot: screenshots/adv-010.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Modified `_clear_caption()` and `set_caption_text()` in `client/main.py` to toggle `self.label.setVisible(False)` when text is empty, hiding stylesheet background and border boxes during silence.
+- qa: retested _clear_caption() and label visibility toggling, inspected screenshots/def-012_cleared_silence.png, closed
+
+## DEF-011: Long transcriptions vertically overflow fixed 140px overlay window
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: adversary (ADV-009)
+- Phase: 1
+
+Steps to reproduce:
+1. Launch `client/main.py` transparent overlay window.
+2. Send multi-line or long (500+ char) caption text to the overlay window.
+3. Observe text rendering and window dimensions.
+
+Expected: Overlay window resizes or wraps text cleanly without clipping bottom lines.
+Actual: `client/main.py` hardcodes window height to `height = 140`. When multi-line captions exceed 140px in total height, the bottom lines of text are clipped off the bottom edge of the overlay window.
+Screenshot: screenshots/adv-009.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Added `_update_geometry()` to `TransparentOverlayWindow` (`client/main.py`) to dynamically adjust window height based on text content hint to accommodate multi-line captions without clipping.
+- qa: retested long caption rendering with multi-line text; inspected screenshots/def-011_long_text.png and found top and bottom text lines are still clipped because sizeHint().height() doesn't calculate wrapped label height (heightForWidth), reopened
+- orchestrator: marked FIX-READY on behalf of frontend-dev: FIX READY — Updated `TransparentOverlayWindow._update_geometry()` in `client/main.py` to calculate the required wrapped label height using `self.label.heightForWidth(label_width)` and enforce it with `self.setFixedHeight(req_height)` using `not self.label.isHidden()` visibility checks.
+- qa: retested long caption multi-line wrapping and dynamic window height calculation; verified heightForWidth height expansion and inspected screenshots/def-011_long_text.png, regression tested clear and short text transitions, closed
+
+## DEF-010: Transparent Overlay UI renders unescaped HTML tags in transcriptions
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: adversary (ADV-008)
+- Phase: 1
+
+Steps to reproduce:
+1. Launch `client/main.py` transparent overlay window.
+2. Send transcription text containing HTML tags (e.g. `<h1 style="color:red">HACKED</h1>` or `<speaker 1>`) to the overlay window.
+3. Observe text rendered on the overlay window.
+
+Expected: Text rendered as plain escaped text on overlay label.
+Actual: `QLabel` in Qt interprets text containing HTML tags as rich text formatting, modifying font sizes, colors, or structure on the overlay window.
+Screenshot: screenshots/adv-008.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Set `self.label.setTextFormat(Qt.TextFormat.PlainText)` on `TransparentOverlayWindow` in `client/main.py` to render raw HTML tags in transcriptions as literal plain text.
+- qa: retested QLabel plain text formatting with unescaped HTML tags, inspected screenshots/def-010_plain_text.png, closed
+
+## DEF-009: RelayServer logs misleading status "Disconnected from extension" when remote STT server drops connection
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: adversary (ADV-007)
+- Phase: 1
+
+Steps to reproduce:
+1. Launch `client/main.py` relay server connected to remote STT server.
+2. Connect Chrome extension to local relay server and start captioning.
+3. Terminate remote STT server process mid-stream.
+
+Expected: Relay server UI signal and logs indicate remote STT connection dropped (e.g., "Remote STT server disconnected").
+Actual: `RelayServer.handle_client` in `client/main.py` catches remote disconnect in `finally` and emits `self.signal_bridge.status_changed.emit("Disconnected from extension.")`, giving misleading diagnostic feedback.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Updated `RelayServer` (`client/main.py`) to track disconnect sources and emit `"Remote STT server disconnected."` when remote STT connections drop.
+- qa: retested RelayServer disconnect tracking when remote STT closes, verified 'Remote STT server disconnected' status, closed
+
+## DEF-008: Multiple concurrent client connections on Local Relay Server corrupt UI overlay and misreport status
+
+- Status: CLOSED
+- Severity: MEDIUM
+- Found by: adversary (ADV-006)
+- Phase: 1
+
+Steps to reproduce:
+1. Launch `client/main.py` relay server and overlay window.
+2. Connect two extension clients/tabs simultaneously to local relay server (`ws://localhost:8765`).
+3. Stream audio from both clients, then disconnect Client 1 while Client 2 is still actively streaming.
+
+Expected: Relay server handles connections cleanly or enforces single-session lock without mixing transcriptions or setting incorrect global status.
+Actual: Transcriptions from both clients are emitted to the same PyQt overlay window, interleaving and overwriting captions. When Client 1 disconnects, `finally` block emits status "Disconnected from extension", setting UI status to disconnected even though Client 2 is still actively streaming.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Added single-session lock (`self.active_client`) in `RelayServer` (`client/main.py`) to reject concurrent client connections with close code 1008 and preserve active stream integrity and UI status.
+- qa: retested RelayServer single-session lock and rejection of concurrent client connections with code 1008, closed
+
+## DEF-007: Extension audio WebSocket opened before media stream acquisition leads to hung sessions
+
+- Status: CLOSED
+- Severity: MEDIUM
+- Found by: adversary (ADV-005)
+- Phase: 1
+
+Steps to reproduce:
+1. Open Chrome with WebCaptioner extension loaded.
+2. Click "Start Captioning" in an environment where `navigator.mediaDevices.getUserMedia` fails (e.g., tab capture permission denied or tab closed).
+3. Inspect offscreen script background WebSocket connections.
+
+Expected: If tab audio capture fails, open WebSocket should be closed and error reported to service worker.
+Actual: `ws = new WebSocket("ws://localhost:8765")` is created before `getUserMedia()` is called in `offscreen.js`. When `getUserMedia()` throws an error, catch block logs error but leaves WebSocket connection open in background, leaving extension stuck in `isCapturing = true` with a silent hung WebSocket connection.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Updated `extension/offscreen.js` `startCapture()` to acquire the tab `MediaStream` prior to instantiating the WebSocket connection, catching stream errors and stopping capture cleanly.
+- qa: retested acquiring MediaStream before WebSocket instantiation in offscreen script, verified error catching, closed
+
+## DEF-006: Extension offscreen capture initialization uses race-prone hardcoded 200ms delay
+
+- Status: CLOSED
+- Severity: MEDIUM
+- Found by: adversary (ADV-004)
+- Phase: 1
+
+Steps to reproduce:
+1. Open Chrome with WebCaptioner extension loaded.
+2. Click "Start Captioning" under heavy system load or slow offscreen document creation.
+3. Inspect `background.js` execution flow during offscreen document setup.
+
+Expected: Service worker waits for offscreen document to confirm ready state via message/event before dispatching `startCapture`.
+Actual: `background.js` uses `setTimeout(() => { chrome.runtime.sendMessage({ action: "startCapture", ... }) }, 200)`. If document creation takes longer than 200ms, `startCapture` message is lost before listener registers. Extension state becomes `isCapturing = true` but audio capture never starts.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Replaced race-prone `setTimeout(200)` delay in `extension/background.js` with event-driven synchronization using an `offscreenReady` initialization message sent from `extension/offscreen.js`.
+- qa: retested event-driven offscreenReady synchronization between offscreen document and background worker, closed
+
+## DEF-005: Extension UI gets permanently stuck in "Captioning" state on WebSocket drop or server offline
+
+- Status: CLOSED
+- Severity: HIGH
+- Found by: adversary (ADV-003)
+- Phase: 1
+
+Steps to reproduce:
+1. Open Chrome with WebCaptioner extension loaded.
+2. Ensure local relay server is offline (or kill local relay server process while captioning is active).
+3. Click "Start Captioning" in Chrome extension popup.
+
+Expected: Offscreen script catches connection error or close event, notifies background worker and popup, stops audio capture, and resets extension popup UI to "Start Captioning" with an error status.
+Actual: `offscreen.js` `ws.onerror` and `ws.onclose` handlers only log to console and do not notify `background.js` or `popup.js`. Offscreen document continues capturing tab audio endlessly, `background.js` retains `isCapturing = true`, and popup UI remains permanently stuck in "Status: Captioning..." and "Stop Captioning" state.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Added WebSocket close/error handling in `extension/offscreen.js` to trigger `stopCapture()` and dispatch `captureStopped` messages to `background.js` and `popup.js`, resetting state and returning popup UI to "Start Captioning".
+- qa: retested offscreen WebSocket error and close handlers, verified captureStopped broadcast and popup state reset, closed
+
+## DEF-004: Odd-length binary audio message permanently corrupts 16-bit PCM sample alignment
+
+- Status: CLOSED
+- Severity: HIGH
+- Found by: adversary (ADV-002)
+- Phase: 1
+
+Steps to reproduce:
+1. Start `server/main.py` on port 8000.
+2. Connect a WebSocket client to `ws://127.0.0.1:8000/transcribe`.
+3. Send an odd-length binary audio message (e.g. 1 byte or 1001 bytes).
+4. Send subsequent standard 16-bit PCM binary audio chunks.
+
+Expected: Server trims or discards leftover odd bytes when processing chunks so that future chunks maintain proper 2-byte 16-bit PCM sample alignment.
+Actual: `server/main.py` computes `valid_len = len(audio_buffer) - (len(audio_buffer) % 2)` and converts `audio_buffer[:valid_len]` to `np.int16`, but leaves remaining 1 byte at index 0 of `audio_buffer`. Every subsequent 2-byte sample added to `audio_buffer` becomes byte-swapped (high and low bytes inverted), permanently corrupting all transcriptions for the rest of the session with static noise.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Trimmed trailing odd bytes on incoming binary audio chunks and copied byte buffers in `server/main.py` so future 16-bit PCM chunks remain 2-byte aligned without buffer export lock errors.
+- qa: retested odd-length binary audio chunk alignment trimming and buffer copying, verified PCM byte alignment, closed
+
+## DEF-003: Unsupported language or task string in JSON config crashes remote STT WebSocket session
+
+- Status: CLOSED
+- Severity: HIGH
+- Found by: adversary (ADV-001)
+- Phase: 1
+
+Steps to reproduce:
+1. Start `server/main.py` (or mock STT server) on port 8000.
+2. Connect a WebSocket client to `ws://127.0.0.1:8000/transcribe`.
+3. Send JSON config message `{"type": "config", "language": "english"}` or `{"type": "config", "language": "invalid_lang"}` (instead of 2-letter ISO code like `en`).
+4. Send a binary audio chunk over the WebSocket connection.
+
+Expected: Server validates language string, falls back gracefully or ignores invalid language code, and continues servicing the WebSocket connection.
+Actual: `faster_whisper` raises unhandled `ValueError: "invalid_lang" is not a valid language code`. The exception escapes the transcription loop in `server/main.py` and crashes the entire WebSocket session immediately.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Validated language and task codes against faster-whisper supported sets with fallback to auto-detection/transcribe and exception handling in `server/stt.py` and `server/main.py`.
+- qa: retested server language/task input validation and fallback handling with invalid language/task config strings, closed
+
+## DEF-002: Local Client mock STT server ignores mid-session JSON config updates
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: qa
+- Phase: 1
+
+Steps to reproduce:
+1. Start `run_mock_stt_server` on port 8000.
+2. Connect a WebSocket client to `ws://127.0.0.1:8000/transcribe`.
+3. Send initial JSON config `{"type": "config", "language": "es"}`.
+4. Send an audio chunk and observe response in Spanish.
+5. Send an updated JSON config `{"type": "config", "language": "en"}` on the same active connection.
+6. Send another audio chunk and observe response.
+
+Expected: The mock STT server updates its active language configuration to English for subsequent responses (matching server/main.py behavior).
+Actual: The mock STT server only reads configuration once on connection startup and ignores mid-session JSON config updates, continuing to return Spanish responses.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of frontend-dev: FIX READY — Updated `run_mock_stt_server` in `client/main.py` to parse JSON config messages dynamically inside the websocket message loop and update language configuration mid-session without returning audio response frames for config messages.
+- qa: retested run_mock_stt_server mid-session JSON config updates, verified dynamic language switching, closed
+
+## DEF-001: Backend test client server/test_client.py fails under pytest due to missing async decorator
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: qa
+- Phase: 1
+
+Steps to reproduce:
+1. Open terminal at project root.
+2. Run `.venv/bin/pytest`.
+3. Observe test execution output.
+
+Expected: All unit tests collected by pytest execute and pass cleanly.
+Actual: `server/test_client.py::test_stt_websocket` fails with error "Failed: async def function... async def functions are not natively supported" because the test function lacks `@pytest.mark.asyncio`.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of backend-dev: FIX READY — Added `@pytest.mark.asyncio` decorator to `test_stt_websocket()` in `server/test_client.py` and handled offline STT server connections.
+- qa: retested pytest execution of server/test_client.py, passes cleanly with @pytest.mark.asyncio, closed
+
