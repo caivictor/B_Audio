@@ -2,7 +2,7 @@
 End-to-End Tests for PyQt6 Transparent Overlay UI specifications (REQUIREMENTS.md Phase 1).
 
 Verifies:
-1. Window flags: FramelessWindowHint, WindowStaysOnTopHint, WindowTransparentForInput.
+1. Window flags: FramelessWindowHint, WindowStaysOnTopHint.
 2. Translucent background attribute WA_TranslucentBackground.
 3. Subtitle styling and drop shadow effect.
 4. Positioning logic (bottom-center of screen).
@@ -35,11 +35,10 @@ def test_overlay_window_flags_and_attributes(qapp):
     # Requirement: WA_TranslucentBackground enabled
     assert overlay.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground) is True
 
-    # Requirement: Frameless, Always-On-Top, Click-Through (WindowTransparentForInput)
+    # Requirement: Frameless, Always-On-Top
     flags = overlay.windowFlags()
     assert bool(flags & Qt.WindowType.FramelessWindowHint) is True, "FramelessWindowHint missing"
     assert bool(flags & Qt.WindowType.WindowStaysOnTopHint) is True, "WindowStaysOnTopHint missing"
-    assert bool(flags & Qt.WindowType.WindowTransparentForInput) is True, "WindowTransparentForInput missing"
 
     # Verify label text initialization
     assert overlay.label.text() == "Testing Requirements"

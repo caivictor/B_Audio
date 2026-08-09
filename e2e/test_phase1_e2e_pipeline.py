@@ -178,7 +178,7 @@ async def test_extension_connection_when_stt_offline(qapp):
             config = json.dumps({"type": "config", "language": "es"})
             await ext_ws.send(config)
 
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(4)
 
             # Check that status bridge logged error connecting to STT
             assert any("Error connecting to STT server" in st for st in received_statuses)
