@@ -12,11 +12,13 @@ import logging
 import asyncio
 import threading
 import argparse
+import re
+import html
 from typing import Optional
 
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QVBoxLayout, QGraphicsDropShadowEffect, QStyleOption, QStyle
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QRect
-from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QMouseEvent
+from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QMouseEvent, QTextDocument, QTextOption
 
 import websockets
 
@@ -35,10 +37,74 @@ class CaptionSignalBridge(QObject):
     font_size_changed = pyqtSignal(int)
 
 
+SPEAKER_COLORS = {
+    "Speaker 1": "#ff9999",
+    "Speaker A": "#ff9999",
+    "Speaker 2": "#99ccff",
+    "Speaker B": "#99ccff",
+    "Speaker 3": "#99ff99",
+    "Speaker C": "#99ff99",
+    "Speaker 4": "#ffcc99",
+    "Speaker D": "#ffcc99",
+}
+
+DEFAULT_PALETTE = ["#ff9999", "#99ccff", "#99ff99", "#ffcc99", "#cc99ff", "#ffff99"]
+
+
+def get_speaker_color(speaker_id: str) -> str:
+    """Return hex color code associated with a speaker label."""
+    clean_id = speaker_id.strip()
+    if clean_id in SPEAKER_COLORS:
+        return SPEAKER_COLORS[clean_id]
+    for k, v in SPEAKER_COLORS.items():
+        if k.lower() == clean_id.lower():
+            return v
+    idx = sum(ord(c) for c in clean_id) % len(DEFAULT_PALETTE)
+    return DEFAULT_PALETTE[idx]
+
+
+def parse_speaker_tags(text: str) -> str:
+    """
+    Parse speaker tags (e.g., [Speaker 1]: or [Speaker A]:) in transcription text
+    and format them into HTML spans with assigned speaker colors.
+    If speaker tags are present, HTML characters in raw text segments are safely escaped.
+    If no speaker tags are present, returns original text unchanged.
+    """
+    if not text:
+        return ""
+
+    pattern = r"\[(Speaker\s*[^\]]+)\]:?"
+    matches = list(re.finditer(pattern, text, re.IGNORECASE))
+    if not matches:
+        return text
+
+    escaped_text = html.escape(text)
+    escaped_matches = list(re.finditer(pattern, escaped_text, re.IGNORECASE))
+
+    result = []
+    last_idx = 0
+    for i, match in enumerate(escaped_matches):
+        prefix = escaped_text[last_idx:match.start()]
+        if prefix:
+            result.append(prefix)
+
+        speaker_label = match.group(1).strip()
+        color = get_speaker_color(speaker_label)
+        next_start = escaped_matches[i + 1].start() if i + 1 < len(escaped_matches) else len(escaped_text)
+        segment_text = escaped_text[match.end():next_start]
+
+        formatted_segment = f'<span style="color: {color};"><b>[{match.group(1)}]:</b>{segment_text}</span>'
+        result.append(formatted_segment)
+        last_idx = next_start
+
+    return "".join(result)
+
+
 class StrokedLabel(QLabel):
     """
     QLabel subclass that renders text with a dark outline (stroke)
-    around white text to ensure readability on bright/light backgrounds.
+    around text to ensure readability on bright/light backgrounds.
+    Supports RichText/HTML formatting for color-coded speaker tags.
     """
     def __init__(self, text: str = "", parent: Optional[QWidget] = None):
         super().__init__(text, parent)
@@ -70,8 +136,14 @@ class StrokedLabel(QLabel):
         alignment = self.alignment()
         painter.setFont(self.font())
 
+        is_rich = self.textFormat() == Qt.TextFormat.RichText or ("<" in text and ">" in text)
+        if is_rich:
+            plain_text = html.unescape(re.sub(r'<[^>]*>', '', text))
+        else:
+            plain_text = text
+
         w = self._stroke_width
-        if w > 0:
+        if w > 0 and plain_text:
             painter.setPen(self._stroke_color)
             for dx in range(-w, w + 1):
                 for dy in range(-w, w + 1):
@@ -81,15 +153,30 @@ class StrokedLabel(QLabel):
                         painter.drawText(
                             rect.translated(dx, dy),
                             alignment | Qt.TextFlag.TextWordWrap,
-                            text
+                            plain_text
                         )
 
-        painter.setPen(self._text_color)
-        painter.drawText(
-            rect,
-            alignment | Qt.TextFlag.TextWordWrap,
-            text
-        )
+        if is_rich:
+            doc = QTextDocument()
+            doc.setDefaultFont(self.font())
+            doc.setDefaultStyleSheet("body { color: #ffffff; }")
+            doc.setTextWidth(rect.width())
+            doc.setHtml(f'<div align="center">{text}</div>')
+
+            doc_height = doc.size().height()
+            y_offset = rect.y() + max(0, (rect.height() - doc_height) / 2)
+
+            painter.save()
+            painter.translate(rect.x(), y_offset)
+            doc.drawContents(painter)
+            painter.restore()
+        else:
+            painter.setPen(self._text_color)
+            painter.drawText(
+                rect,
+                alignment | Qt.TextFlag.TextWordWrap,
+                text
+            )
 
 
 class TransparentOverlayWindow(QWidget):
@@ -130,8 +217,12 @@ class TransparentOverlayWindow(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
 
         text_to_display = initial_text if initial_text is not None else "WebCaptioner Ready"
-        self.label = StrokedLabel(text_to_display)
-        self.label.setTextFormat(Qt.TextFormat.PlainText)
+        parsed_text = parse_speaker_tags(text_to_display)
+        self.label = StrokedLabel(parsed_text)
+        if parsed_text != text_to_display:
+            self.label.setTextFormat(Qt.TextFormat.RichText)
+        else:
+            self.label.setTextFormat(Qt.TextFormat.PlainText)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setWordWrap(True)
 
@@ -243,7 +334,12 @@ class TransparentOverlayWindow(QWidget):
         if not text:
             self._clear_caption()
             return
-        self.label.setText(text)
+        parsed_text = parse_speaker_tags(text)
+        if parsed_text != text:
+            self.label.setTextFormat(Qt.TextFormat.RichText)
+        else:
+            self.label.setTextFormat(Qt.TextFormat.PlainText)
+        self.label.setText(parsed_text)
         self.label.setVisible(True)
         self._update_geometry()
         # Reset clear timer for 10 seconds of silence
@@ -436,8 +532,16 @@ async def run_mock_stt_server(host="127.0.0.1", port=8000):
     async def handler(websocket):
         logger.info("Mock STT server client connected.")
         sample_texts = {
-            "es": ["Hola, bienvenidos a la demostración.", "Transcripción en tiempo real funcionando."],
-            "en": ["Hello, welcome to the demonstration.", "Real-time transcription working correctly."],
+            "es": [
+                "[Speaker 1]: Hola, bienvenidos a la demostración.",
+                "[Speaker 2]: Transcripción en tiempo real funcionando.",
+                "[Speaker 1]: ¿Cómo estás? [Speaker 2]: Muy bien, gracias."
+            ],
+            "en": [
+                "[Speaker 1]: Hello, welcome to the demonstration.",
+                "[Speaker 2]: Real-time transcription working correctly.",
+                "[Speaker 1]: How are you? [Speaker 2]: I am doing great, thank you."
+            ],
         }
         lang = "es"
         task = "transcribe"

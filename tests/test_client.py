@@ -8,7 +8,16 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from client.main import TransparentOverlayWindow, CaptionSignalBridge, RelayServer, run_mock_stt_server
+from client.main import (
+    TransparentOverlayWindow,
+    CaptionSignalBridge,
+    RelayServer,
+    run_mock_stt_server,
+    parse_speaker_tags,
+    get_speaker_color,
+    SPEAKER_COLORS,
+    StrokedLabel,
+)
 
 
 @pytest.fixture(scope="session")
@@ -364,6 +373,58 @@ async def test_mock_stt_server_task_translate_and_switch(qapp):
     finally:
         mock_stt.close()
         await mock_stt.wait_closed()
+
+
+def test_parse_speaker_tags_colors():
+    """Verify parse_speaker_tags formats speaker tags with color codes and escapes HTML."""
+    # 1. Single Speaker 1 tag
+    parsed1 = parse_speaker_tags("[Speaker 1]: Hello world")
+    assert 'style="color: #ff9999;"' in parsed1
+    assert "<b>[Speaker 1]:</b>" in parsed1
+    assert "Hello world" in parsed1
+
+    # 2. Single Speaker 2 tag
+    parsed2 = parse_speaker_tags("[Speaker 2]: Hi there")
+    assert 'style="color: #99ccff;"' in parsed2
+    assert "<b>[Speaker 2]:</b>" in parsed2
+    assert "Hi there" in parsed2
+
+    # 3. Multiple speaker tags in a single string
+    parsed_multi = parse_speaker_tags("[Speaker 1]: Hello! [Speaker 2]: How are you?")
+    assert "#ff9999" in parsed_multi
+    assert "#99ccff" in parsed_multi
+
+    # 4. HTML escaping when speaker tag is present
+    parsed_xss = parse_speaker_tags("[Speaker 1]: <script>alert(1)</script>")
+    assert "&lt;script&gt;" in parsed_xss
+    assert "<script>" not in parsed_xss
+
+    # 5. Plain text without tags remains unchanged
+    plain = parse_speaker_tags("Plain text caption")
+    assert plain == "Plain text caption"
+
+
+def test_overlay_speaker_colors_rendering(qapp):
+    """Verify TransparentOverlayWindow parses and displays colorized speaker tags (Phase 4)."""
+    overlay = TransparentOverlayWindow(initial_text="[Speaker 1]: Initial subtitle")
+    assert overlay.label.textFormat() == Qt.TextFormat.RichText
+    assert "#ff9999" in overlay.label.text()
+
+    overlay.set_caption_text("[Speaker 2]: Second speaker speaking")
+    assert overlay.label.textFormat() == Qt.TextFormat.RichText
+    assert "#99ccff" in overlay.label.text()
+
+
+def test_stroked_label_rich_text_rendering(qapp):
+    """Verify StrokedLabel paints RichText without exceptions."""
+    label = StrokedLabel()
+    label.setTextFormat(Qt.TextFormat.RichText)
+    label.setText('<span style="color: #ff9999;"><b>[Speaker 1]:</b> Subtitle text</span>')
+    label.resize(400, 100)
+    label.show()
+    QApplication.processEvents()
+    assert label.textFormat() == Qt.TextFormat.RichText
+
 
 
 
