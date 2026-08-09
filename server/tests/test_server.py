@@ -3,6 +3,7 @@ Unit tests for Remote STT Server API endpoints and transcription service.
 """
 import numpy as np
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from server.main import app
 from server.stt import STTService, stt_service
@@ -165,3 +166,48 @@ def test_websocket_idle_timeout_keepalive(monkeypatch):
         # Client stays idle; server should send keepalive ping after timeout
         msg = websocket.receive_json()
         assert msg == {"type": "ping"}
+
+
+def test_stt_service_translate_task_parameter():
+    """
+    Test that STTService correctly passes task='translate' to faster-whisper model.transcribe.
+    """
+    stt = STTService(model_size="tiny", device="cpu", compute_type="int8")
+    stt.load_model()
+    audio = np.zeros(1600, dtype=np.float32)
+
+    with patch.object(stt.model, "transcribe", return_value=([], None)) as mock_transcribe:
+        # Test default task 'transcribe'
+        stt.transcribe(audio, language="es")
+        mock_transcribe.assert_called_once()
+        _, kwargs1 = mock_transcribe.call_args
+        assert kwargs1.get("task") == "transcribe"
+
+        mock_transcribe.reset_mock()
+
+        # Test explicit 'translate' task
+        stt.transcribe(audio, language="es", task="translate")
+        mock_transcribe.assert_called_once()
+        _, kwargs2 = mock_transcribe.call_args
+        assert kwargs2.get("task") == "translate"
+        assert kwargs2.get("language") == "es"
+
+
+def test_websocket_translate_task_parameter():
+    """
+    Test that WebSocket endpoint correctly parses 'task': 'translate' from config message
+    and passes task='translate' to STTService.
+    """
+    with patch.object(stt_service, "transcribe", return_value="hello world") as mock_transcribe:
+        with client.websocket_connect("/transcribe") as websocket:
+            # Send translation config
+            websocket.send_json({"type": "config", "language": "es", "task": "translate"})
+            # Send audio bytes
+            websocket.send_bytes(bytes(3200))
+
+            res = websocket.receive_json()
+            assert res == {"text": "hello world"}
+            assert mock_transcribe.called
+            _, kwargs = mock_transcribe.call_args
+            assert kwargs.get("task") == "translate"
+            assert kwargs.get("language") == "es"
