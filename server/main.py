@@ -58,6 +58,7 @@ async def transcribe_websocket(websocket: WebSocket):
     """
     await websocket.accept()
     logger.info("Client connected to /transcribe endpoint.")
+    stt_service.reset_speaker()
 
     language: str | None = None
     task: str = "transcribe"
@@ -104,6 +105,7 @@ async def transcribe_websocket(websocket: WebSocket):
                             task = config["task"]
                         # Clear buffer on new configuration
                         audio_buffer.clear()
+                        stt_service.reset_speaker()
                         logger.info(f"Updated config: language={language}, task={task}")
                 except Exception as parse_err:
                     logger.warning(f"Failed to parse JSON config message: {parse_err}")

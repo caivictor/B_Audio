@@ -67,19 +67,31 @@ async def test_stt_websocket():
     pcm_data = generate_test_speech_pcm()
     print(f"Prepared test audio buffer: {len(pcm_data)} bytes ({len(pcm_data)/32000:.2f} seconds)")
 
-    mock_server = None
+    server_task = None
 
     try:
         ws_test = await websockets.connect(SERVER_URL)
         await ws_test.close()
     except (OSError, ConnectionRefusedError):
-        from client.main import run_mock_stt_server
+        import uvicorn
+        from server.main import app
 
         parsed = urllib.parse.urlparse(SERVER_URL)
         host = parsed.hostname or "127.0.0.1"
         port = parsed.port or 8000
 
-        mock_server = await run_mock_stt_server(host=host, port=port)
+        config = uvicorn.Config(app, host=host, port=port, log_level="error")
+        server = uvicorn.Server(config)
+        server_task = asyncio.create_task(server.serve())
+        
+        # Wait until server is listening
+        for _ in range(30):
+            try:
+                ws = await websockets.connect(SERVER_URL)
+                await ws.close()
+                break
+            except (OSError, ConnectionRefusedError):
+                await asyncio.sleep(0.2)
 
     try:
         async with websockets.connect(SERVER_URL) as ws:
@@ -105,14 +117,17 @@ async def test_stt_websocket():
 
                 print(f"Received response: {resp}")
                 assert "text" in resp, "Response missing 'text' field!"
-                responses.append(resp["text"])
+                text = resp["text"]
+                if text:
+                    assert "[Speaker" in text, f"Expected speaker tag in transcription, got '{text}'"
+                responses.append(text)
 
             print("\nTest finished successfully!")
             print(f"Final transcription text: '{responses[-1] if responses else ''}'")
     finally:
-        if mock_server:
-            mock_server.close()
-            await mock_server.wait_closed()
+        if server_task:
+            server.should_exit = True
+            await server_task
 
 
 if __name__ == "__main__":
