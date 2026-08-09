@@ -17,10 +17,34 @@ logger = logging.getLogger("stt_server")
 SUPPORTED_TASKS = {"transcribe", "translate"}
 
 
+class SpeakerState:
+    """
+    Encapsulates speaker diarization tracking state for an individual session.
+    """
+    def __init__(self):
+        self.current_speaker: int = 1
+        self.last_audio_had_speech: bool = False
+        self.time_since_last_speech_end: float = 0.0
+        self.last_segment_end_time: float = 0.0
+
+    def reset(self) -> None:
+        self.current_speaker = 1
+        self.last_audio_had_speech = False
+        self.time_since_last_speech_end = 0.0
+        self.last_segment_end_time = 0.0
+
+    def toggle_speaker(self) -> None:
+        self.current_speaker = 2 if self.current_speaker == 1 else 1
+
+
 class STTService:
     """
     Manages loading and running inference with faster-whisper models and speaker diarization.
     """
+    _shared_model = None
+    _shared_device = None
+    _shared_compute_type = None
+
     def __init__(
         self,
         model_size: str = WHISPER_MODEL,
@@ -30,16 +54,57 @@ class STTService:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
-        self.model = None
+        self._model = None
 
         # Speaker diarization state
-        self.current_speaker = 1
-        self.last_audio_had_speech = False
-        self.last_segment_end_time = 0.0
+        self.speaker_state = SpeakerState()
         self.pause_threshold_sec = 0.4
         self.silence_energy_threshold = 0.005
         self.pyannote_pipeline = None
         self._init_diarization()
+
+    @property
+    def model(self):
+        if self._model is not None:
+            return self._model
+        return STTService._shared_model
+
+    @model.setter
+    def model(self, value):
+        self._model = value
+        STTService._shared_model = value
+
+    @property
+    def current_speaker(self) -> int:
+        return self.speaker_state.current_speaker
+
+    @current_speaker.setter
+    def current_speaker(self, val: int) -> None:
+        self.speaker_state.current_speaker = val
+
+    @property
+    def last_audio_had_speech(self) -> bool:
+        return self.speaker_state.last_audio_had_speech
+
+    @last_audio_had_speech.setter
+    def last_audio_had_speech(self, val: bool) -> None:
+        self.speaker_state.last_audio_had_speech = val
+
+    @property
+    def time_since_last_speech_end(self) -> float:
+        return self.speaker_state.time_since_last_speech_end
+
+    @time_since_last_speech_end.setter
+    def time_since_last_speech_end(self, val: float) -> None:
+        self.speaker_state.time_since_last_speech_end = val
+
+    @property
+    def last_segment_end_time(self) -> float:
+        return self.speaker_state.last_segment_end_time
+
+    @last_segment_end_time.setter
+    def last_segment_end_time(self, val: float) -> None:
+        self.speaker_state.last_segment_end_time = val
 
     def _init_diarization(self) -> None:
         """
@@ -61,15 +126,13 @@ class STTService:
         """
         Resets speaker diarization tracking state.
         """
-        self.current_speaker = 1
-        self.last_audio_had_speech = False
-        self.last_segment_end_time = 0.0
+        self.speaker_state.reset()
 
     def toggle_speaker(self) -> None:
         """
         Alternates current speaker between 1 and 2.
         """
-        self.current_speaker = 2 if self.current_speaker == 1 else 1
+        self.speaker_state.toggle_speaker()
 
     def format_speaker_tag(self, text: str, speaker_num: int) -> str:
         """
@@ -94,7 +157,7 @@ class STTService:
             f"(device={self.device}, compute_type={self.compute_type})..."
         )
         try:
-            self.model = WhisperModel(
+            loaded_model = WhisperModel(
                 self.model_size,
                 device=self.device,
                 compute_type=self.compute_type
@@ -105,7 +168,7 @@ class STTService:
                 f"Failed to load Whisper model on device '{self.device}': {e}. "
                 f"Falling back to CPU int8."
             )
-            self.model = WhisperModel(
+            loaded_model = WhisperModel(
                 self.model_size,
                 device="cpu",
                 compute_type="int8"
@@ -114,15 +177,23 @@ class STTService:
             self.compute_type = "int8"
             logger.info("Fallback CPU Whisper model loaded successfully.")
 
+        STTService._shared_model = loaded_model
+        STTService._shared_device = self.device
+        STTService._shared_compute_type = self.compute_type
+        self._model = loaded_model
+
     def transcribe(
         self,
         audio_data: np.ndarray,
         language: str | None = None,
-        task: str = "transcribe"
+        task: str = "transcribe",
+        speaker_state: SpeakerState | None = None
     ) -> str:
         """
         Transcribes numpy float32 audio array (16kHz mono).
         """
+        state = speaker_state if speaker_state is not None else self.speaker_state
+
         if self.model is None:
             self.load_model()
 
@@ -149,6 +220,8 @@ class STTService:
 
         audio_rms = np.sqrt(np.mean(audio_data**2)) if len(audio_data) > 0 else 0.0
         is_silent = audio_rms < self.silence_energy_threshold
+        sample_rate = 16000
+        chunk_duration = len(audio_data) / sample_rate if len(audio_data) > 0 else 0.0
 
         try:
             segments_iter, _ = self.model.transcribe(audio_data, beam_size=1, **kwargs)
@@ -169,26 +242,37 @@ class STTService:
 
         valid_segments = [s for s in segments if s.text and s.text.strip()]
         if not valid_segments:
-            if is_silent:
-                self.last_audio_had_speech = False
+            if is_silent or state.last_audio_had_speech:
+                state.last_audio_had_speech = False
+            if state.last_segment_end_time > 0.0 or state.time_since_last_speech_end > 0.0:
+                state.time_since_last_speech_end += chunk_duration
             return ""
 
-        # Switch speaker if silence occurred prior to this speech chunk
-        if not self.last_audio_had_speech and self.last_segment_end_time > 0.0:
-            self.toggle_speaker()
-
         tagged_segments = []
-        for s in valid_segments:
-            seg_text = s.text.strip()
-            # Switch speaker if there was a pause >= threshold before this segment
-            if self.last_audio_had_speech and (s.start - self.last_segment_end_time >= self.pause_threshold_sec):
-                self.toggle_speaker()
+        prev_seg_end = None
 
-            tagged_seg = self.format_speaker_tag(seg_text, self.current_speaker)
+        for i, s in enumerate(valid_segments):
+            seg_text = s.text.strip()
+            if i == 0:
+                if state.last_audio_had_speech or state.time_since_last_speech_end > 0.0:
+                    pause_before_seg = state.time_since_last_speech_end + s.start
+                else:
+                    pause_before_seg = 0.0
+            else:
+                pause_before_seg = s.start - prev_seg_end
+
+            if pause_before_seg >= self.pause_threshold_sec:
+                state.toggle_speaker()
+
+            tagged_seg = self.format_speaker_tag(seg_text, state.current_speaker)
             tagged_segments.append(tagged_seg)
 
-            self.last_segment_end_time = s.end
-            self.last_audio_had_speech = True
+            prev_seg_end = s.end
+
+        last_seg = valid_segments[-1]
+        state.last_audio_had_speech = True
+        state.time_since_last_speech_end = max(0.0, chunk_duration - last_seg.end)
+        state.last_segment_end_time = last_seg.end
 
         return " ".join(tagged_segments)
 

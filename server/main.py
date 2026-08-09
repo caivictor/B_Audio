@@ -8,7 +8,7 @@ import numpy as np
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from server.config import KEEPALIVE_TIMEOUT_SECONDS, MAX_BUFFER_SECONDS, SAMPLE_RATE
-from server.stt import stt_service
+from server.stt import stt_service, SpeakerState
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("stt_server")
@@ -58,7 +58,9 @@ async def transcribe_websocket(websocket: WebSocket):
     """
     await websocket.accept()
     logger.info("Client connected to /transcribe endpoint.")
-    stt_service.reset_speaker()
+
+    # Isolated speaker diarization state per connection (DEF-018)
+    session_speaker_state = SpeakerState()
 
     language: str | None = None
     task: str = "transcribe"
@@ -105,7 +107,7 @@ async def transcribe_websocket(websocket: WebSocket):
                             task = config["task"]
                         # Clear buffer on new configuration
                         audio_buffer.clear()
-                        stt_service.reset_speaker()
+                        session_speaker_state.reset()
                         logger.info(f"Updated config: language={language}, task={task}")
                 except Exception as parse_err:
                     logger.warning(f"Failed to parse JSON config message: {parse_err}")
@@ -142,7 +144,8 @@ async def transcribe_websocket(websocket: WebSocket):
                         stt_service.transcribe,
                         audio_np,
                         language=language,
-                        task=task
+                        task=task,
+                        speaker_state=session_speaker_state
                     )
                 except Exception as transcribe_err:
                     logger.error(f"Error during transcription task: {transcribe_err}")

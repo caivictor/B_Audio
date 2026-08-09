@@ -46,9 +46,32 @@ SPEAKER_COLORS = {
     "Speaker C": "#99ff99",
     "Speaker 4": "#ffcc99",
     "Speaker D": "#ffcc99",
+    "Speaker 5": "#cc99ff",
+    "Speaker E": "#cc99ff",
+    "Speaker 6": "#ffff99",
+    "Speaker F": "#ffff99",
+    "Speaker 7": "#ff99ff",
+    "Speaker G": "#ff99ff",
+    "Speaker 8": "#99ffff",
+    "Speaker H": "#99ffff",
+    "Speaker 9": "#ffb3e6",
+    "Speaker I": "#ffb3e6",
+    "Speaker 10": "#c2f0c2",
+    "Speaker J": "#c2f0c2",
 }
 
-DEFAULT_PALETTE = ["#ff9999", "#99ccff", "#99ff99", "#ffcc99", "#cc99ff", "#ffff99"]
+DEFAULT_PALETTE = [
+    "#ff9999",
+    "#99ccff",
+    "#99ff99",
+    "#ffcc99",
+    "#cc99ff",
+    "#ffff99",
+    "#ff99ff",
+    "#99ffff",
+    "#ffb3e6",
+    "#c2f0c2",
+]
 
 
 def get_speaker_color(speaker_id: str) -> str:
@@ -78,7 +101,7 @@ def parse_speaker_tags(text: str) -> str:
     if not matches:
         return text
 
-    escaped_text = html.escape(text)
+    escaped_text = html.escape(text).replace('\n', '<br>')
     escaped_matches = list(re.finditer(pattern, escaped_text, re.IGNORECASE))
 
     result = []
@@ -136,41 +159,65 @@ class StrokedLabel(QLabel):
         alignment = self.alignment()
         painter.setFont(self.font())
 
-        is_rich = self.textFormat() == Qt.TextFormat.RichText or ("<" in text and ">" in text)
-        if is_rich:
-            plain_text = html.unescape(re.sub(r'<[^>]*>', '', text))
+        fmt = self.textFormat()
+        if fmt == Qt.TextFormat.RichText:
+            is_rich = True
+        elif fmt == Qt.TextFormat.PlainText:
+            is_rich = False
         else:
-            plain_text = text
+            is_rich = Qt.mightBeRichText(text)
 
         w = self._stroke_width
-        if w > 0 and plain_text:
-            painter.setPen(self._stroke_color)
-            for dx in range(-w, w + 1):
-                for dy in range(-w, w + 1):
-                    if dx == 0 and dy == 0:
-                        continue
-                    if dx*dx + dy*dy <= (w + 0.5) ** 2:
-                        painter.drawText(
-                            rect.translated(dx, dy),
-                            alignment | Qt.TextFlag.TextWordWrap,
-                            plain_text
-                        )
 
         if is_rich:
+            rich_text = text.replace('\n', '<br>')
+
             doc = QTextDocument()
             doc.setDefaultFont(self.font())
             doc.setDefaultStyleSheet("body { color: #ffffff; }")
             doc.setTextWidth(rect.width())
-            doc.setHtml(f'<div align="center">{text}</div>')
+            doc.setHtml(f'<div align="center">{rich_text}</div>')
 
             doc_height = doc.size().height()
             y_offset = rect.y() + max(0, (rect.height() - doc_height) / 2)
+
+            if w > 0:
+                stroke_color_hex = self._stroke_color.name()
+                stroke_html = re.sub(r'color:\s*[^;"]+;?', f'color: {stroke_color_hex};', rich_text)
+                stroke_doc = QTextDocument()
+                stroke_doc.setDefaultFont(self.font())
+                stroke_doc.setDefaultStyleSheet(f"* {{ color: {stroke_color_hex} !important; }}")
+                stroke_doc.setTextWidth(rect.width())
+                stroke_doc.setHtml(f'<div align="center">{stroke_html}</div>')
+
+                for dx in range(-w, w + 1):
+                    for dy in range(-w, w + 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        if dx * dx + dy * dy <= (w + 0.5) ** 2:
+                            painter.save()
+                            painter.translate(rect.x() + dx, y_offset + dy)
+                            stroke_doc.drawContents(painter)
+                            painter.restore()
 
             painter.save()
             painter.translate(rect.x(), y_offset)
             doc.drawContents(painter)
             painter.restore()
         else:
+            if w > 0:
+                painter.setPen(self._stroke_color)
+                for dx in range(-w, w + 1):
+                    for dy in range(-w, w + 1):
+                        if dx == 0 and dy == 0:
+                            continue
+                        if dx * dx + dy * dy <= (w + 0.5) ** 2:
+                            painter.drawText(
+                                rect.translated(dx, dy),
+                                alignment | Qt.TextFlag.TextWordWrap,
+                                text
+                            )
+
             painter.setPen(self._text_color)
             painter.drawText(
                 rect,

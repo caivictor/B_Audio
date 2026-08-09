@@ -1,3 +1,127 @@
+## DEF-019: Modulo index fallback assigns identical highlight colors to different speakers
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: adversary (ADV-016)
+- Phase: 3
+
+Steps to reproduce:
+1. Launch `client/main.py` overlay window.
+2. Send transcription text containing speaker tags for Speakers 3 and 5 (`[Speaker 3]: ... [Speaker 5]: ...`) or Speakers 4 and 6 to the overlay window.
+3. Observe assigned text highlight colors for each speaker.
+
+Expected: Each speaker receives a visually distinct color code from the palette.
+Actual: `get_speaker_color` in `client/main.py` computes fallback color index using `sum(ord(c) for c in clean_id) % len(DEFAULT_PALETTE)`. For Speaker 5, the ASCII sum 796 modulo 6 yields index 2 (`#99ff99`), which is identical to Speaker 3 (`#99ff99`). Similarly, Speaker 6 evaluates to index 3 (`#ffcc99`), identical to Speaker 4. Speakers 3 and 5 (and Speakers 4 and 6) render in identical colors, making them indistinguishable.
+Screenshot: screenshots/adv-014.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Expanded SPEAKER_COLORS palette for up to 10 unique speakers without collisions.
+- qa: retested get_speaker_color for Speakers 1 through 10, verified unique hex colors across all 10 speakers (Speaker 3=#99ff99, Speaker 5=#cc99ff, Speaker 4=#ffcc99, Speaker 6=#ffff99), captured and inspected screenshots/def-019_speaker_colors.png, regression tested overlay speaker tag parsing, closed
+
+## DEF-018: Global STTService instance contaminates speaker diarization state across concurrent client sessions
+
+- Status: CLOSED
+- Severity: HIGH
+- Found by: adversary (ADV-015)
+- Phase: 3
+
+Steps to reproduce:
+1. Start `server/main.py` STT server on port 8000.
+2. Connect two WebSocket clients simultaneously to `/transcribe` endpoint and stream audio from both clients.
+3. Observe speaker diarization state across both sessions.
+
+Expected: Each client WebSocket session maintains its own isolated speaker diarization state.
+Actual: `stt_service` in `server/stt.py` is instantiated as a global singleton. Calling `reset_speaker()` or `transcribe()` on new connection or incoming audio mutates global attributes (`current_speaker`, `last_audio_had_speech`, `last_segment_end_time`). Concurrent client streams continuously overwrite each other's speaker history, corrupting speaker tracking across sessions.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Manage per-connection SpeakerState instances for concurrent session speaker isolation.
+- qa: retested concurrent client SpeakerState instances, verified session 1 state changes do not affect session 2, regression tested WebSocket /transcribe session lifecycle and reset_speaker logic, closed
+
+## DEF-017: Streaming Speaker Diarization pause-threshold calculation compares incompatible timebases across audio chunks
+
+- Status: CLOSED
+- Severity: HIGH
+- Found by: adversary (ADV-014)
+- Phase: 3
+
+Steps to reproduce:
+1. Start `server/main.py` STT server on port 8000.
+2. Stream two consecutive audio chunks separated by a pause over WebSocket to `/transcribe`.
+3. Observe speaker diarization labels in transcription output.
+
+Expected: When a pause exceeding `pause_threshold_sec` (0.4s) occurs between audio chunks, speaker diarization toggles the active speaker label (e.g., from Speaker 1 to Speaker 2).
+Actual: `STTService.transcribe` in `server/stt.py` calculates pause duration as `s.start - self.last_segment_end_time`, where `s.start` is the offset in the current chunk buffer (e.g. 0.2s) and `last_segment_end_time` is the offset in the previous chunk buffer (e.g. 2.5s). Subtracting a previous chunk offset from a current chunk offset results in a negative value (e.g. -2.3s), which fails the `>= 0.4` check. Pause detection across streaming chunks never fires, leaving speaker diarization permanently stuck on a single speaker.
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Updated server/stt.py to track trailing chunk durations for accurate pause threshold calculation.
+- qa: retested pause duration tracking across consecutive streaming audio chunks with trailing silence, verified pause >= 0.4s toggles active speaker label to Speaker 2, regression tested single-chunk and multi-chunk transcriptions, closed
+
+## DEF-016: Multi-line speaker transcriptions separated by newlines lose line breaks when rendered in StrokedLabel
+
+- Status: CLOSED
+- Severity: MEDIUM
+- Found by: adversary (ADV-013)
+- Phase: 3
+
+Steps to reproduce:
+1. Launch `client/main.py` overlay window.
+2. Send multi-speaker transcription text containing explicit newlines (e.g. `[Speaker 1]: First line of speech / [Speaker 2]: Second line of speech`) to the overlay window.
+3. Observe line rendering on the overlay window.
+
+Expected: Each speaker's dialogue renders on its own separate line in the overlay window.
+Actual: `parse_speaker_tags` wraps each speaker segment in HTML `<span>` tags preserving the newline character. However, when `QTextDocument.setHtml` parses the HTML string in `StrokedLabel.paintEvent`, HTML whitespace collapsing rules convert newlines to a single space. The newlines are lost, and all speaker lines are merged onto a single horizontal line.
+Screenshot: screenshots/adv-013.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Converts newlines to <br> for multi-line rich text rendering.
+- qa: retested multi-speaker transcriptions separated by newlines, verified parse_speaker_tags converts \n to <br> and renders dialogue on separate lines, captured and inspected screenshots/def-016_multiline.png, regression tested single-line speaker tags, closed
+
+## DEF-015: Transcriptions without speaker tags containing angle brackets (<...>) have contents inside brackets erased by RichText parsing in StrokedLabel
+
+- Status: CLOSED
+- Severity: MEDIUM
+- Found by: adversary (ADV-012)
+- Phase: 3
+
+Steps to reproduce:
+1. Launch `client/main.py` overlay window.
+2. Send transcription text without speaker tags containing angle brackets (e.g. `Comparing values: 5 < 10 and 20 > 15 in transcription text.` or Whisper non-speech markers like `<music>` or `<applause>`) to the overlay window.
+3. Observe the displayed text on the overlay window.
+
+Expected: The text is safely escaped or rendered verbatim, preserving all characters including `<` and `>`.
+Actual: `parse_speaker_tags` returns raw text when no speaker tags match. In `StrokedLabel.paintEvent`, line 140 checks `is_rich = self.textFormat() == Qt.TextFormat.RichText or ("<" in text and ">" in text)`, setting `is_rich` to True. `re.sub(r'<[^>]*>', '', text)` strips the contents inside `<...>`, and `QTextDocument.setHtml` ignores the unknown HTML tag, causing text between `<` and `>` (e.g. `10 and 20`) to be completely deleted from the overlay display.
+Screenshot: screenshots/adv-012.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Removed forced rich text detection so PlainText format preserves angle brackets.
+- qa: retested transcriptions without speaker tags containing angle brackets (<...> and <music>), verified PlainText format preserves angle brackets and text inside brackets verbatim, captured and inspected screenshots/def-015_angle_brackets.png, regression tested rich text speaker tags, closed
+
+## DEF-014: Bold speaker tag formatting causes stroke outline text to wrap at different word boundaries than foreground rich text in StrokedLabel
+
+- Status: CLOSED
+- Severity: HIGH
+- Found by: adversary (ADV-011)
+- Phase: 3
+
+Steps to reproduce:
+1. Launch `client/main.py` overlay window with constrained width (e.g. 260px).
+2. Send transcription text containing speaker tags (e.g. `[Speaker 1]: Hello everyone welcome to our demonstration today of real time captioning.`) to the overlay window.
+3. Observe text wrapping and alignment of stroke outline versus foreground text.
+
+Expected: The black stroke outline text and the colored foreground text wrap at the exact same word boundaries, maintaining a tight, readable outline around all words.
+Actual: `StrokedLabel.paintEvent` computes stroke text layout using unstyled plain text (`painter.drawText`) while computing foreground text layout using HTML rich text (`QTextDocument`) containing bold speaker tags (`<b>[Speaker 1]:</b>`). Because bold font metrics make `[Speaker 1]:` wider in rich text, `QTextDocument` wraps words to line 2 earlier than `painter.drawText`. The black stroke outline text and foreground colored text wrap on different words, causing the black stroke outline to detach and misalign from the foreground text on screen.
+Screenshot: screenshots/adv-011.png
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY — Updated StrokedLabel to use a matching QTextDocument layout for rich text stroke outlines, aligning word wraps.
+- qa: retested StrokedLabel rich text rendering with bold speaker tags on constrained width (260px), verified stroke outline QTextDocument layout matches foreground rich text layout and word wrap boundaries, captured and inspected screenshots/def-014_bold_stroke.png, regression tested plain text stroke outline rendering, closed
+
 ## DEF-013: Local Client mock STT server ignores task parameter in config JSON and returns untranslated source text
 
 - Status: CLOSED
