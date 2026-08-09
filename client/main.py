@@ -440,6 +440,7 @@ async def run_mock_stt_server(host="127.0.0.1", port=8000):
             "en": ["Hello, welcome to the demonstration.", "Real-time transcription working correctly."],
         }
         lang = "es"
+        task = "transcribe"
         texts = sample_texts["es"]
         idx = 0
 
@@ -449,11 +450,15 @@ async def run_mock_stt_server(host="127.0.0.1", port=8000):
                     try:
                         data = json.loads(message)
                         if isinstance(data, dict):
-                            if "language" in data or data.get("type") == "config":
+                            if "language" in data or "task" in data or data.get("type") == "config":
                                 lang = data.get("language", lang)
-                                texts = sample_texts.get(lang, sample_texts["es"])
+                                task = data.get("task", task)
+                                if task == "translate":
+                                    texts = sample_texts["en"]
+                                else:
+                                    texts = sample_texts.get(lang, sample_texts["es"])
                                 idx = 0
-                                logger.info("Mock STT updated config: language=%s", lang)
+                                logger.info("Mock STT updated config: language=%s, task=%s", lang, task)
                                 continue
                     except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
                         pass

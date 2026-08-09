@@ -332,3 +332,38 @@ async def test_relay_server_remote_stt_disconnect_status():
         await relay.stop()
 
 
+@pytest.mark.asyncio
+async def test_mock_stt_server_task_translate_and_switch(qapp):
+    """Verify run_mock_stt_server handles task='translate' and dynamic task switching (DEF-013)."""
+    import websockets
+
+    mock_port = get_free_port()
+    mock_stt = await run_mock_stt_server(host="127.0.0.1", port=mock_port)
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{mock_port}") as ws:
+            # 1. Config task='translate'
+            config_translate = json.dumps({"type": "config", "language": "es", "task": "translate"})
+            await ws.send(config_translate)
+
+            # Send audio chunk
+            await ws.send(b"\x00\x00" * 8000)
+            resp1 = json.loads(await ws.recv())
+            text1 = resp1.get("text", "")
+            assert "Hello" in text1 or "welcome" in text1 or "demonstration" in text1
+
+            # 2. Config task='transcribe' mid-session
+            config_transcribe = json.dumps({"type": "config", "language": "es", "task": "transcribe"})
+            await ws.send(config_transcribe)
+
+            # Send audio chunk
+            await ws.send(b"\x00\x00" * 8000)
+            resp2 = json.loads(await ws.recv())
+            text2 = resp2.get("text", "")
+            assert "Hola" in text2 or "bienvenidos" in text2 or "demostración" in text2
+    finally:
+        mock_stt.close()
+        await mock_stt.wait_closed()
+
+
+

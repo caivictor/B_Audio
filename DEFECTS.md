@@ -1,3 +1,25 @@
+## DEF-013: Local Client mock STT server ignores task parameter in config JSON and returns untranslated source text
+
+- Status: CLOSED
+- Severity: LOW
+- Found by: qa
+- Phase: 3
+
+Steps to reproduce:
+1. Launch `run_mock_stt_server` on port 8000 (or via client `main.py --mock-server`).
+2. Connect a WebSocket client to `ws://127.0.0.1:8000/transcribe`.
+3. Send JSON config `{"type": "config", "language": "es", "task": "translate"}`.
+4. Send binary PCM audio chunk over WebSocket connection.
+5. Observe response text returned by mock STT server.
+
+Expected: `run_mock_stt_server` parses `task: "translate"` and returns English translation sample text ("Hello, welcome to the demonstration.").
+Actual: `run_mock_stt_server` in `client/main.py` only inspects `language` in config data and ignores `task`. When `language: "es"` and `task: "translate"` are set, it returns untranslated Spanish text ("Hola, bienvenidos a la demostración.").
+
+History:
+- qa: opened
+- orchestrator: marked FIX-READY on behalf of frontend-dev: FIX READY — Updated `run_mock_stt_server` in `client/main.py` to parse the `task` parameter in JSON config messages and return English translation text when `task == "translate"`.
+- qa: retested run_mock_stt_server with task="translate" and language="es", verified English translation sample text returned, regression tested dynamic mid-session task switching between "translate" and "transcribe", closed
+
 ## DEF-012: Overlay window displays empty dark background box during silence after clearing text
 
 - Status: CLOSED
