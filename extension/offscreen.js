@@ -5,6 +5,7 @@ let processorNode = null;
 let pcmBuffer = [];
 let currentLanguage = 'es';
 let currentFontSize = 24;
+let currentTask = 'transcribe';
 let isReconnecting = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
@@ -17,17 +18,19 @@ chrome.runtime.sendMessage({ action: 'offscreenReady' });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'startCapture') {
-    startCapture(message.streamId, message.language, message.fontSize);
+    startCapture(message.streamId, message.language, message.fontSize, message.task);
   } else if (message.action === 'stopCapture') {
     stopCapture();
   } else if (message.action === 'updateConfig') {
     if (message.language) currentLanguage = message.language;
     if (message.fontSize) currentFontSize = message.fontSize;
+    if (message.task) currentTask = message.task;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'config',
         language: currentLanguage,
-        fontSize: currentFontSize
+        fontSize: currentFontSize,
+        task: currentTask
       }));
     }
   }
@@ -41,10 +44,11 @@ function handleWsDisconnect(errorMsg) {
   });
 }
 
-async function startCapture(streamId, language, fontSize) {
+async function startCapture(streamId, language, fontSize, task) {
   stopCapture(); // Clean up any existing capture session
   currentLanguage = language || 'es';
   currentFontSize = fontSize || 24;
+  currentTask = task || 'transcribe';
 
   try {
     // 1. Obtain MediaStream from Chrome tab capture streamId FIRST (DEF-007)
@@ -126,7 +130,8 @@ function setupWebSocketHandlers() {
     const config = {
       type: 'config',
       language: currentLanguage,
-      fontSize: currentFontSize
+      fontSize: currentFontSize,
+      task: currentTask
     };
     ws.send(JSON.stringify(config));
   };
