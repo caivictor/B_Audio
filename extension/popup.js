@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const languageSelect = document.getElementById('languageSelect');
   const fontSizeSelect = document.getElementById('fontSizeSelect');
+  const translateCheckbox = document.getElementById('translateCheckbox');
   const toggleBtn = document.getElementById('toggleBtn');
   const statusDiv = document.getElementById('status');
 
@@ -25,20 +26,28 @@ document.addEventListener('DOMContentLoaded', () => {
       if (response.fontSize) {
         fontSizeSelect.value = response.fontSize.toString();
       }
+      if (response.task) {
+        translateCheckbox.checked = (response.task === 'translate');
+      }
       updateUI(response.isCapturing);
     }
   });
 
-  // Handle dynamic font size changes
-  fontSizeSelect.addEventListener('change', () => {
+  function sendConfigUpdate() {
     const selectedFontSize = parseInt(fontSizeSelect.value, 10);
     const selectedLanguage = languageSelect.value;
+    const selectedTask = translateCheckbox.checked ? 'translate' : 'transcribe';
     chrome.runtime.sendMessage({
       action: 'updateConfig',
       fontSize: selectedFontSize,
-      language: selectedLanguage
+      language: selectedLanguage,
+      task: selectedTask
     });
-  });
+  }
+
+  // Handle dynamic font size or translation toggle changes
+  fontSizeSelect.addEventListener('change', sendConfigUpdate);
+  translateCheckbox.addEventListener('change', sendConfigUpdate);
 
   function updateUI(isCapturing) {
     if (isCapturing) {
@@ -60,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const isCurrentlyActive = toggleBtn.classList.contains('active');
     const selectedLanguage = languageSelect.value;
     const selectedFontSize = parseInt(fontSizeSelect.value, 10);
+    const selectedTask = translateCheckbox.checked ? 'translate' : 'transcribe';
 
     if (!isCurrentlyActive) {
       // Query active tab
@@ -70,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       chrome.runtime.sendMessage(
-        { action: 'start', language: selectedLanguage, fontSize: selectedFontSize, tabId: tab.id },
+        { action: 'start', language: selectedLanguage, fontSize: selectedFontSize, task: selectedTask, tabId: tab.id },
         (response) => {
           if (chrome.runtime.lastError) {
             statusDiv.textContent = 'Status: Error starting';

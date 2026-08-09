@@ -87,3 +87,27 @@ def test_extension_font_size_controls():
     assert "currentFontSize" in bg_js, "background.js must maintain currentFontSize"
     assert "updateConfig" in bg_js, "background.js must handle updateConfig message"
     assert "currentFontSize" in offscreen_js, "offscreen.js must handle fontSize config"
+
+
+def test_extension_translation_toggle():
+    """Verify popup HTML, popup JS, background JS, and offscreen JS support Translate to English toggle."""
+    popup_html = Path("extension/popup.html").read_text(encoding="utf-8")
+    popup_js = Path("extension/popup.js").read_text(encoding="utf-8")
+    bg_js = Path("extension/background.js").read_text(encoding="utf-8")
+    offscreen_js = Path("extension/offscreen.js").read_text(encoding="utf-8")
+
+    # popup.html UI element check
+    assert 'id="translateCheckbox"' in popup_html, "popup.html must contain translateCheckbox element"
+    assert "Translate to English" in popup_html, "popup.html must contain Translate to English label"
+
+    # popup.js logic check
+    assert "translateCheckbox" in popup_js, "popup.js must reference translateCheckbox"
+    assert "'translate'" in popup_js or '"translate"' in popup_js, "popup.js must handle translate task mode"
+    assert "'transcribe'" in popup_js or '"transcribe"' in popup_js, "popup.js must handle transcribe task mode"
+
+    # background.js state and messaging check
+    assert "currentTask" in bg_js, "background.js must maintain currentTask"
+
+    # offscreen.js WebSocket config message check
+    assert "currentTask" in offscreen_js, "offscreen.js must maintain currentTask"
+    assert "task:" in offscreen_js or '"task"' in offscreen_js, "offscreen.js must include task in config JSON message"
