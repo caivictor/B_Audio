@@ -21,7 +21,7 @@ from PyQt6.QtCore import Qt
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from client.main import RelayServer, CaptionSignalBridge, TransparentOverlayWindow, run_mock_stt_server
+from client.main import RelayServer, CaptionSignalBridge, TransparentOverlayWindow, run_mock_stt_server, parse_speaker_tags
 
 
 def get_free_port() -> int:
@@ -97,7 +97,7 @@ async def test_full_e2e_transcription_pipeline_spanish(qapp):
             assert len(received_texts) > 0, "No transcription text received from pipeline"
             latest_text = received_texts[-1]
             assert "demostración" in latest_text or "Transcripción" in latest_text or "bienvenidos" in latest_text
-            assert overlay.label.text() == latest_text
+            assert overlay.label.text() == parse_speaker_tags(latest_text)
 
     finally:
         mock_server.close()
@@ -143,7 +143,7 @@ async def test_full_e2e_transcription_pipeline_english(qapp):
             assert len(received_texts) > 0
             latest_text = received_texts[-1]
             assert "Hello" in latest_text or "demonstration" in latest_text or "Real-time" in latest_text
-            assert overlay.label.text() == latest_text
+            assert overlay.label.text() == parse_speaker_tags(latest_text)
 
     finally:
         mock_server.close()
