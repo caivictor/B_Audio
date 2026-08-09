@@ -198,7 +198,7 @@ def test_websocket_translate_task_parameter():
     Test that WebSocket endpoint correctly parses 'task': 'translate' from config message
     and passes task='translate' to STTService.
     """
-    with patch.object(stt_service, "transcribe", return_value="hello world") as mock_transcribe:
+    with patch.object(stt_service, "transcribe", return_value="[Speaker 1]: hello world") as mock_transcribe:
         with client.websocket_connect("/transcribe") as websocket:
             # Send translation config
             websocket.send_json({"type": "config", "language": "es", "task": "translate"})
@@ -206,8 +206,95 @@ def test_websocket_translate_task_parameter():
             websocket.send_bytes(bytes(3200))
 
             res = websocket.receive_json()
-            assert res == {"text": "hello world"}
+            assert res == {"text": "[Speaker 1]: hello world"}
             assert mock_transcribe.called
             _, kwargs = mock_transcribe.call_args
             assert kwargs.get("task") == "translate"
             assert kwargs.get("language") == "es"
+
+
+class MockSegment:
+    def __init__(self, text: str, start: float = 0.0, end: float = 1.0):
+        self.text = text
+        self.start = start
+        self.end = end
+
+
+def test_stt_service_speaker_diarization_tagging():
+    """
+    Test STTService prefixes transcribed text with [Speaker 1]: tag.
+    """
+    stt = STTService(model_size="tiny", device="cpu", compute_type="int8")
+    stt.load_model()
+    stt.reset_speaker()
+    audio = np.ones(16000, dtype=np.float32) * 0.1
+    segments = [MockSegment("Hello world", start=0.0, end=1.0)]
+
+    with patch.object(stt.model, "transcribe", return_value=(segments, None)):
+        text = stt.transcribe(audio, language="en")
+        assert text == "[Speaker 1]: Hello world"
+
+
+def test_stt_service_pause_speaker_alternation():
+    """
+    Test STTService alternates speaker tags ([Speaker 1]: -> [Speaker 2]:) when pause >= 0.4s occurs.
+    """
+    stt = STTService(model_size="tiny", device="cpu", compute_type="int8")
+    stt.load_model()
+    stt.reset_speaker()
+    audio = np.ones(16000, dtype=np.float32) * 0.1
+
+    segments = [
+        MockSegment("Hello there", start=0.0, end=1.0),
+        MockSegment("General Kenobi", start=1.8, end=2.8)
+    ]
+
+    with patch.object(stt.model, "transcribe", return_value=(segments, None)):
+        text = stt.transcribe(audio, language="en")
+        assert text == "[Speaker 1]: Hello there [Speaker 2]: General Kenobi"
+
+
+def test_stt_service_turn_taking_across_silent_chunks():
+    """
+    Test speaker turn taking across audio chunks separated by silence.
+    """
+    stt = STTService(model_size="tiny", device="cpu", compute_type="int8")
+    stt.load_model()
+    stt.reset_speaker()
+
+    speech_audio = np.ones(16000, dtype=np.float32) * 0.1
+    silent_audio = np.zeros(16000, dtype=np.float32)
+
+    # Chunk 1: Speaker 1
+    seg1 = [MockSegment("First speaker here", start=0.0, end=1.0)]
+    with patch.object(stt.model, "transcribe", return_value=(seg1, None)):
+        res1 = stt.transcribe(speech_audio)
+        assert res1 == "[Speaker 1]: First speaker here"
+
+    # Chunk 2: Silence
+    with patch.object(stt.model, "transcribe", return_value=([], None)):
+        res2 = stt.transcribe(silent_audio)
+        assert res2 == ""
+
+    # Chunk 3: Speaker 2 (Speech resumes after silence)
+    seg2 = [MockSegment("Second speaker replying", start=0.0, end=1.0)]
+    with patch.object(stt.model, "transcribe", return_value=(seg2, None)):
+        res3 = stt.transcribe(speech_audio)
+        assert res3 == "[Speaker 2]: Second speaker replying"
+
+
+def test_websocket_speaker_diarization_response():
+    """
+    Test WebSocket /transcribe endpoint returns JSON {"text": "[Speaker 1]: ..."} response with speaker tags.
+    """
+    mock_segments = [MockSegment("Hello from WebSocket", start=0.0, end=1.0)]
+    with patch.object(stt_service.model, "transcribe", return_value=(mock_segments, None)):
+        with client.websocket_connect("/transcribe") as websocket:
+            websocket.send_json({"type": "config", "language": "en"})
+            pcm_bytes = (np.ones(16000, dtype=np.int16) * 3000).tobytes()
+            websocket.send_bytes(pcm_bytes)
+
+            response = websocket.receive_json()
+            assert "text" in response
+            assert response["text"] == "[Speaker 1]: Hello from WebSocket"
+
