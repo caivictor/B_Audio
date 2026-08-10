@@ -1,4 +1,22 @@
 
+## DEF-023: Unclear UI error when starting capture on restricted tabs
+- Status: CLOSED
+- Severity: LOW
+- Found by: User UAT
+- Phase: 1
+
+Steps to reproduce:
+1. Open a restricted page (e.g., chrome://extensions, a blank New Tab, or Chrome Settings).
+2. Click the extension popup and hit "Start Captioning".
+
+Expected: The UI explains that this tab cannot be captured.
+Actual: The UI confusingly displays "Status: Failed to start" with no context, leading users to believe the STT session crashed.
+
+History:
+- qa: opened
+- frontend-dev: FIX READY - Updated `extension/popup.js` to append `response.error` from Chrome's `runtime.lastError` to the UI label.
+- qa: CLOSED - Verified restricted tabs now display descriptive messages like "Failed to start (Cannot capture a chrome:// URL)".
+
 ## DEF-020: Overlay box is not draggable on Wayland
 - Status: CLOSED
 - Severity: MEDIUM
