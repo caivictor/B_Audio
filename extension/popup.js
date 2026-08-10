@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (response && response.success) {
             updateUI(true);
           } else {
-            statusDiv.textContent = 'Status: Failed to start';
+            statusDiv.textContent = 'Status: Failed to start (' + (response.error || 'Unknown') + ')';
           }
         }
       );
