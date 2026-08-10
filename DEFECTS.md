@@ -1,3 +1,58 @@
+
+## DEF-020: Overlay box is not draggable on Wayland
+- Status: CLOSED
+- Severity: MEDIUM
+- Found by: User UAT
+- Phase: 2
+
+Steps to reproduce:
+1. Run local client on Ubuntu 24.04 (Wayland).
+2. Attempt to click and drag the overlay window.
+
+Expected: Overlay moves with the mouse.
+Actual: Window ignores move events because absolute positioning is blocked by Wayland compositor.
+
+History:
+- qa: opened
+- frontend-dev: FIX READY - Switched to windowHandle().startSystemMove() for native OS window dragging.
+- qa: CLOSED - Verified draggable across X11 and Wayland.
+
+## DEF-021: Speaker tags do not start on new lines
+- Status: CLOSED
+- Severity: LOW
+- Found by: User UAT
+- Phase: 4
+
+Steps to reproduce:
+1. Stream audio with two speakers.
+2. Observe overlay UI formatting.
+
+Expected: Each speaker starts on a new line for readability.
+Actual: Transcriptions append as a single continuous string (e.g. `[Speaker 1] xxx. [Speaker 2] yyy.`)
+
+History:
+- qa: opened
+- frontend-dev: FIX READY - Updated `parse_speaker_tags` in `client/main.py` to prefix new speaker tags with `<br>`.
+- qa: CLOSED - Verified multi-speaker captions stack vertically.
+
+## DEF-022: Excessive translation latency and audio desync on CPU
+- Status: CLOSED
+- Severity: HIGH
+- Found by: User UAT
+- Phase: 3
+
+Steps to reproduce:
+1. Start GPU-less or VRAM-starved remote server (falls back to CPU).
+2. Start Japanese to English translation streaming.
+3. Observe subtitle sync.
+
+Expected: Latency < 2-3 seconds.
+Actual: The text log lags many seconds behind the video and progressively gets worse over time.
+
+History:
+- qa: opened
+- backend-dev: FIX READY - Reduced MAX_BUFFER_SECONDS from 30 to 10. Added `condition_on_previous_text=False` to speed up Whisper CPU inference. Implemented aggressive WebSocket receive queue draining in `server/main.py` to catch up when CPU thread lags behind the chunk rate.
+- qa: CLOSED - Verified translation sync recovers and stays near real-time on CPU.
 ## DEF-019: Modulo index fallback assigns identical highlight colors to different speakers
 
 - Status: CLOSED

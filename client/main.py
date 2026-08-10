@@ -108,6 +108,14 @@ def parse_speaker_tags(text: str) -> str:
     last_idx = 0
     for i, match in enumerate(escaped_matches):
         prefix = escaped_text[last_idx:match.start()]
+        
+        # Insert line break if a new speaker tag appears and there isn't already one
+        if i > 0:
+            if prefix and not prefix.rstrip().endswith('<br>'):
+                prefix += '<br>'
+            elif not prefix:
+                result.append('<br>')
+                
         if prefix:
             result.append(prefix)
 
@@ -321,6 +329,11 @@ class TransparentOverlayWindow(QWidget):
     def mousePressEvent(self, event: QMouseEvent):
         """Capture drag start position when left mouse button is pressed."""
         if event.button() == Qt.MouseButton.LeftButton:
+            self._user_dragged = True
+            if self.windowHandle() and hasattr(self.windowHandle(), "startSystemMove"):
+                if self.windowHandle().startSystemMove():
+                    event.accept()
+                    return
             self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 

@@ -15,7 +15,7 @@ PORT = int(os.getenv("PORT", "8000"))
 
 # Audio processing settings
 SAMPLE_RATE = 16000
-MAX_BUFFER_SECONDS = int(os.getenv("MAX_BUFFER_SECONDS", "30"))
+MAX_BUFFER_SECONDS = int(os.getenv("MAX_BUFFER_SECONDS", "10"))
 
 # Keepalive and idle timeout settings
 KEEPALIVE_TIMEOUT_SECONDS = float(os.getenv("KEEPALIVE_TIMEOUT_SECONDS", "60.0"))

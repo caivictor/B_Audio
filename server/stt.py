@@ -224,14 +224,14 @@ class STTService:
         chunk_duration = len(audio_data) / sample_rate if len(audio_data) > 0 else 0.0
 
         try:
-            segments_iter, _ = self.model.transcribe(audio_data, beam_size=1, **kwargs)
+            segments_iter, _ = self.model.transcribe(audio_data, beam_size=1, condition_on_previous_text=False, **kwargs)
             segments = list(segments_iter)
         except ValueError as val_err:
             logger.warning(
                 f"Whisper transcription ValueError with kwargs {kwargs}: {val_err}. Retrying with default settings."
             )
             try:
-                segments_iter, _ = self.model.transcribe(audio_data, beam_size=1)
+                segments_iter, _ = self.model.transcribe(audio_data, beam_size=1, condition_on_previous_text=False)
                 segments = list(segments_iter)
             except Exception as retry_err:
                 logger.error(f"Error during fallback transcription inference: {retry_err}")
