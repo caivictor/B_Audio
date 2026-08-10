@@ -61,6 +61,14 @@ async function startCapture(streamId, language, fontSize, task) {
       },
       video: false
     });
+    
+    // Listen for the native Chrome "Stop sharing" button
+    if (mediaStream.getTracks().length > 0) {
+      mediaStream.getTracks()[0].onended = () => {
+        console.log("Media stream ended natively by user.");
+        handleWsDisconnect("Native capture stopped");
+      };
+    }
 
     // 2. Connect WebSocket to local client only after media stream is acquired
     ws = new WebSocket('ws://localhost:8765');

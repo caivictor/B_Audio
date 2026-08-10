@@ -268,8 +268,31 @@ class TransparentOverlayWindow(QWidget):
         self.clear_timer.timeout.connect(self._clear_caption)
 
     def _init_ui(self, initial_text: Optional[str]):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Add a close button layout at the top right
+        from PyQt6.QtWidgets import QHBoxLayout, QPushButton
+        top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(5, 5, 5, 0)
+        top_layout.addStretch()
+        
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.setStyleSheet(
+            "QPushButton { background-color: transparent; color: #a6adc8; border: none; font-weight: bold; }"
+            "QPushButton:hover { color: #f38ba8; }"
+        )
+        self.close_btn.clicked.connect(self.close)
+        # Initially hide the close button, show it on mouse enter
+        self.close_btn.setVisible(False)
+        top_layout.addWidget(self.close_btn)
+        
+        main_layout.addLayout(top_layout)
+
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(20, 5, 20, 20)
+        main_layout.addLayout(layout)
 
         text_to_display = initial_text if initial_text is not None else "WebCaptioner Ready"
         parsed_text = parse_speaker_tags(text_to_display)
@@ -325,6 +348,18 @@ class TransparentOverlayWindow(QWidget):
         self.font_size = size
         self._apply_label_style(size)
         self._update_geometry()
+
+    def enterEvent(self, event):
+        """Show close button on hover"""
+        if hasattr(self, 'close_btn'):
+            self.close_btn.setVisible(True)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Hide close button when mouse leaves"""
+        if hasattr(self, 'close_btn'):
+            self.close_btn.setVisible(False)
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
         """Capture drag start position when left mouse button is pressed."""
