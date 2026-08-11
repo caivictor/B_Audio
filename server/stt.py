@@ -17,6 +17,9 @@ logger = logging.getLogger("stt_server")
 SUPPORTED_TASKS = {"transcribe", "translate"}
 
 
+MIN_VRAM_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+
+
 class SpeakerState:
     """
     Encapsulates speaker diarization tracking state for an individual session.
@@ -54,8 +57,8 @@ class STTService:
         compute_type: str = WHISPER_COMPUTE_TYPE
     ):
         self.model_size = model_size
-        self.device = device
-        self.compute_type = compute_type
+        self._device = device
+        self._compute_type = compute_type
         self._model = None
 
         # Speaker diarization state
@@ -75,6 +78,28 @@ class STTService:
     def model(self, value):
         self._model = value
         STTService._shared_model = value
+
+    @property
+    def device(self) -> str:
+        if self._device is not None:
+            return self._device
+        return STTService._shared_device or WHISPER_DEVICE
+
+    @device.setter
+    def device(self, val: str) -> None:
+        self._device = val
+        STTService._shared_device = val
+
+    @property
+    def compute_type(self) -> str:
+        if self._compute_type is not None:
+            return self._compute_type
+        return STTService._shared_compute_type or WHISPER_COMPUTE_TYPE
+
+    @compute_type.setter
+    def compute_type(self, val: str) -> None:
+        self._compute_type = val
+        STTService._shared_compute_type = val
 
     @property
     def current_speaker(self) -> int:
@@ -147,12 +172,51 @@ class STTService:
             return cleaned
         return f"[Speaker {speaker_num}]: {cleaned}"
 
+    def get_free_vram(self) -> int:
+        """
+        Queries free VRAM in bytes using pynvml on GPU 0.
+        Returns 0 if pynvml fails or CUDA/GPU is unavailable.
+        """
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            try:
+                handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                return info.free
+            finally:
+                try:
+                    pynvml.nvmlShutdown()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"pynvml query failed: {e}")
+            return 0
+
     def load_model(self) -> None:
         """
-        Loads the faster-whisper model. Falls back to CPU if CUDA initialization fails.
+        Loads the faster-whisper model. Checks available VRAM with pynvml before loading:
+        if free VRAM < 2GB, defaults to CPU int8. Otherwise, uses GPU (cuda, float16).
+        Falls back to CPU if CUDA initialization fails.
         """
         if self.model is not None:
             return
+
+        free_vram = self.get_free_vram()
+        if free_vram < MIN_VRAM_BYTES:
+            logger.info(
+                f"Available VRAM ({free_vram / (1024**3):.2f} GB) < 2.00 GB. "
+                "Defaulting to device='cpu', compute_type='int8'."
+            )
+            self.device = "cpu"
+            self.compute_type = "int8"
+        else:
+            logger.info(
+                f"Available VRAM ({free_vram / (1024**3):.2f} GB) >= 2.00 GB. "
+                "Using device='cuda', compute_type='float16'."
+            )
+            self.device = "cuda"
+            self.compute_type = "float16"
 
         logger.info(
             f"Loading Whisper model '{self.model_size}' "
@@ -164,7 +228,7 @@ class STTService:
                 device=self.device,
                 compute_type=self.compute_type
             )
-            logger.info("Whisper model loaded successfully.")
+            logger.info(f"Whisper model loaded successfully on {self.device}.")
         except Exception as e:
             logger.warning(
                 f"Failed to load Whisper model on device '{self.device}': {e}. "
@@ -184,6 +248,24 @@ class STTService:
         STTService._shared_compute_type = self.compute_type
         self._model = loaded_model
 
+    def check_vram_and_reload(self) -> bool:
+        """
+        Checks VRAM and reloads model back to GPU ('cuda') if currently running on CPU
+        and free VRAM becomes >= 2GB.
+        Returns True if reloaded, False otherwise.
+        """
+        if self.device == "cpu":
+            free_vram = self.get_free_vram()
+            if free_vram >= MIN_VRAM_BYTES:
+                logger.info(
+                    f"Free VRAM recovered ({free_vram / (1024**3):.2f} GB >= 2.00 GB). "
+                    "Reloading Whisper model on GPU (cuda)..."
+                )
+                self.model = None
+                self.load_model()
+                return True
+        return False
+
     def transcribe(
         self,
         audio_data: np.ndarray,
@@ -199,6 +281,8 @@ class STTService:
 
         if self.model is None:
             self.load_model()
+        elif self.device == "cpu":
+            self.check_vram_and_reload()
 
         kwargs = {}
         if language and isinstance(language, str):
