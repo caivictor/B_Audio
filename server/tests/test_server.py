@@ -30,8 +30,14 @@ def test_stt_service_transcribe():
     stt = STTService(model_size="tiny", device="cpu", compute_type="int8")
     stt.load_model()
     audio = np.zeros(1600, dtype=np.float32)
-    text = stt.transcribe(audio, language="en")
-    assert isinstance(text, str)
+    res = stt.transcribe(audio, language="en")
+    assert isinstance(res, dict)
+    assert "text" in res
+    assert "start" in res
+    assert "end" in res
+    assert isinstance(res["text"], str)
+    assert isinstance(res["start"], (int, float))
+    assert isinstance(res["end"], (int, float))
 
 
 def test_websocket_transcribe_flow():
@@ -49,7 +55,11 @@ def test_websocket_transcribe_flow():
         # Receive JSON response
         response = websocket.receive_json()
         assert "text" in response
+        assert "start" in response
+        assert "end" in response
         assert isinstance(response["text"], str)
+        assert isinstance(response["start"], (int, float))
+        assert isinstance(response["end"], (int, float))
 
 
 def test_websocket_invalid_json():
@@ -65,6 +75,8 @@ def test_websocket_invalid_json():
 
         response = websocket.receive_json()
         assert "text" in response
+        assert "start" in response
+        assert "end" in response
         assert isinstance(response["text"], str)
 
 
@@ -78,11 +90,15 @@ def test_websocket_config_update():
         websocket.send_bytes(pcm_bytes)
         res1 = websocket.receive_json()
         assert "text" in res1
+        assert "start" in res1
+        assert "end" in res1
 
         websocket.send_json({"type": "config", "language": "en", "task": "translate"})
         websocket.send_bytes(pcm_bytes)
         res2 = websocket.receive_json()
         assert "text" in res2
+        assert "start" in res2
+        assert "end" in res2
 
 
 def test_websocket_invalid_language_and_task():
@@ -92,11 +108,13 @@ def test_websocket_invalid_language_and_task():
     audio = np.zeros(1600, dtype=np.float32)
 
     # Direct STTService test with invalid language & task
-    text1 = stt_service.transcribe(audio, language="invalid_lang", task="invalid_task")
-    assert isinstance(text1, str)
+    res1 = stt_service.transcribe(audio, language="invalid_lang", task="invalid_task")
+    assert isinstance(res1, dict)
+    assert isinstance(res1["text"], str)
 
-    text2 = stt_service.transcribe(audio, language="english", task="unknown")
-    assert isinstance(text2, str)
+    res2 = stt_service.transcribe(audio, language="english", task="unknown")
+    assert isinstance(res2, dict)
+    assert isinstance(res2["text"], str)
 
     # WebSocket integration test
     with client.websocket_connect("/transcribe") as websocket:
@@ -105,6 +123,8 @@ def test_websocket_invalid_language_and_task():
         websocket.send_bytes(pcm_bytes)
         res1 = websocket.receive_json()
         assert "text" in res1
+        assert "start" in res1
+        assert "end" in res1
 
 
 def test_websocket_odd_length_audio_chunks():
@@ -198,7 +218,8 @@ def test_websocket_translate_task_parameter():
     Test that WebSocket endpoint correctly parses 'task': 'translate' from config message
     and passes task='translate' to STTService.
     """
-    with patch.object(stt_service, "transcribe", return_value="[Speaker 1]: hello world") as mock_transcribe:
+    mock_res = {"text": "[Speaker 1]: hello world", "start": 0.0, "end": 1.0}
+    with patch.object(stt_service, "transcribe", return_value=mock_res) as mock_transcribe:
         with client.websocket_connect("/transcribe") as websocket:
             # Send translation config
             websocket.send_json({"type": "config", "language": "es", "task": "translate"})
@@ -206,7 +227,7 @@ def test_websocket_translate_task_parameter():
             websocket.send_bytes(bytes(3200))
 
             res = websocket.receive_json()
-            assert res == {"text": "[Speaker 1]: hello world"}
+            assert res == mock_res
             assert mock_transcribe.called
             _, kwargs = mock_transcribe.call_args
             assert kwargs.get("task") == "translate"
@@ -231,8 +252,10 @@ def test_stt_service_speaker_diarization_tagging():
     segments = [MockSegment("Hello world", start=0.0, end=1.0)]
 
     with patch.object(stt.model, "transcribe", return_value=(segments, None)):
-        text = stt.transcribe(audio, language="en")
-        assert text == "[Speaker 1]: Hello world"
+        res = stt.transcribe(audio, language="en")
+        assert res["text"] == "[Speaker 1]: Hello world"
+        assert res["start"] == 0.0
+        assert res["end"] == 1.0
 
 
 def test_stt_service_pause_speaker_alternation():
@@ -250,8 +273,10 @@ def test_stt_service_pause_speaker_alternation():
     ]
 
     with patch.object(stt.model, "transcribe", return_value=(segments, None)):
-        text = stt.transcribe(audio, language="en")
-        assert text == "[Speaker 1]: Hello there [Speaker 2]: General Kenobi"
+        res = stt.transcribe(audio, language="en")
+        assert res["text"] == "[Speaker 1]: Hello there [Speaker 2]: General Kenobi"
+        assert res["start"] == 0.0
+        assert res["end"] == 2.8
 
 
 def test_stt_service_turn_taking_across_silent_chunks():
@@ -265,27 +290,33 @@ def test_stt_service_turn_taking_across_silent_chunks():
     speech_audio = np.ones(16000, dtype=np.float32) * 0.1
     silent_audio = np.zeros(16000, dtype=np.float32)
 
-    # Chunk 1: Speaker 1
+    # Chunk 1: Speaker 1 (1.0s audio)
     seg1 = [MockSegment("First speaker here", start=0.0, end=1.0)]
     with patch.object(stt.model, "transcribe", return_value=(seg1, None)):
         res1 = stt.transcribe(speech_audio)
-        assert res1 == "[Speaker 1]: First speaker here"
+        assert res1["text"] == "[Speaker 1]: First speaker here"
+        assert res1["start"] == 0.0
+        assert res1["end"] == 1.0
 
-    # Chunk 2: Silence
+    # Chunk 2: Silence (1.0s audio)
     with patch.object(stt.model, "transcribe", return_value=([], None)):
         res2 = stt.transcribe(silent_audio)
-        assert res2 == ""
+        assert res2["text"] == ""
+        assert res2["start"] == 1.0
+        assert res2["end"] == 2.0
 
-    # Chunk 3: Speaker 2 (Speech resumes after silence)
+    # Chunk 3: Speaker 2 (Speech resumes after silence, 1.0s audio)
     seg2 = [MockSegment("Second speaker replying", start=0.0, end=1.0)]
     with patch.object(stt.model, "transcribe", return_value=(seg2, None)):
         res3 = stt.transcribe(speech_audio)
-        assert res3 == "[Speaker 2]: Second speaker replying"
+        assert res3["text"] == "[Speaker 2]: Second speaker replying"
+        assert res3["start"] == 2.0
+        assert res3["end"] == 3.0
 
 
 def test_websocket_speaker_diarization_response():
     """
-    Test WebSocket /transcribe endpoint returns JSON {"text": "[Speaker 1]: ..."} response with speaker tags.
+    Test WebSocket /transcribe endpoint returns JSON {"text": "[Speaker 1]: ...", "start": ..., "end": ...} response with speaker tags.
     """
     mock_segments = [MockSegment("Hello from WebSocket", start=0.0, end=1.0)]
     with patch.object(stt_service.model, "transcribe", return_value=(mock_segments, None)):
@@ -297,4 +328,33 @@ def test_websocket_speaker_diarization_response():
             response = websocket.receive_json()
             assert "text" in response
             assert response["text"] == "[Speaker 1]: Hello from WebSocket"
+            assert response["start"] == 0.0
+            assert response["end"] == 1.0
+
+
+def test_stt_service_timestamps_accumulate_across_chunks():
+    """
+    Test that STTService correctly accumulates audio duration across multiple chunks to generate absolute timestamps.
+    """
+    stt = STTService(model_size="tiny", device="cpu", compute_type="int8")
+    stt.load_model()
+    stt.reset_speaker()
+
+    # Chunk 1: 2 seconds of audio (32000 samples)
+    audio1 = np.ones(32000, dtype=np.float32) * 0.1
+    seg1 = [MockSegment("First chunk", start=0.5, end=1.8)]
+    with patch.object(stt.model, "transcribe", return_value=(seg1, None)):
+        res1 = stt.transcribe(audio1)
+        assert res1["text"] == "[Speaker 1]: First chunk"
+        assert res1["start"] == 0.5
+        assert res1["end"] == 1.8
+
+    # Chunk 2: 3 seconds of audio (48000 samples). Total prior audio = 2.0s.
+    audio2 = np.ones(48000, dtype=np.float32) * 0.1
+    seg2 = [MockSegment("Second chunk", start=0.2, end=2.5)]
+    with patch.object(stt.model, "transcribe", return_value=(seg2, None)):
+        res2 = stt.transcribe(audio2)
+        assert res2["text"] == "[Speaker 1]: Second chunk"
+        assert res2["start"] == 2.2  # 2.0 + 0.2
+        assert res2["end"] == 4.5    # 2.0 + 2.5
 

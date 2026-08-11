@@ -162,7 +162,7 @@ async def transcribe_websocket(websocket: WebSocket):
 
                 # Run transcription in thread pool to prevent blocking asyncio loop
                 try:
-                    text = await asyncio.to_thread(
+                    result = await asyncio.to_thread(
                         stt_service.transcribe,
                         audio_np,
                         language=language,
@@ -171,10 +171,16 @@ async def transcribe_websocket(websocket: WebSocket):
                     )
                 except Exception as transcribe_err:
                     logger.error(f"Error during transcription task: {transcribe_err}")
-                    text = ""
+                    result = {
+                        "text": "",
+                        "start": round(session_speaker_state.total_audio_processed, 3),
+                        "end": round(session_speaker_state.total_audio_processed, 3)
+                    }
+
+                audio_buffer.clear()
 
                 try:
-                    await websocket.send_json({"text": text})
+                    await websocket.send_json(result)
                 except (WebSocketDisconnect, RuntimeError, ConnectionResetError) as send_err:
                     logger.info(f"Client disconnected while sending transcription: {send_err}")
                     break
