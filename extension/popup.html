@@ -87,6 +87,15 @@
       color: #11111b;
     }
 
+    button.secondary {
+      background-color: #45475a;
+      color: #cdd6f4;
+    }
+
+    button.secondary:hover {
+      background-color: #585b70;
+    }
+
     .status {
       margin-top: 12px;
       font-size: 12px;
@@ -138,6 +147,7 @@
     </label>
   </div>
   <button id="toggleBtn">Start Captioning</button>
+  <button id="downloadBtn" class="secondary">Download Transcript</button>
   <div id="status" class="status">Status: Idle</div>
 
   <script src="popup.js"></script>

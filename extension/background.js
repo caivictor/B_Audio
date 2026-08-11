@@ -4,10 +4,16 @@ let currentFontSize = 24;
 let currentTask = 'transcribe';
 let currentServerUrl = 'ws://192.168.0.30:8000/transcribe';
 let currentTabId = null;
+let transcriptHistory = [];
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'getStatus') {
-    sendResponse({ isCapturing, language: currentLanguage, fontSize: currentFontSize, task: currentTask, tabId: currentTabId });
+    sendResponse({ isCapturing, language: currentLanguage, fontSize: currentFontSize, task: currentTask, tabId: currentTabId, transcriptHistory });
+    return true;
+  }
+
+  if (message.action === 'getTranscriptHistory' || message.action === 'getTranscript') {
+    sendResponse({ transcriptHistory });
     return true;
   }
 
@@ -31,6 +37,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     currentTask = message.task || 'transcribe';
     currentServerUrl = message.serverUrl || 'ws://192.168.0.30:8000/transcribe';
     currentTabId = message.tabId;
+    transcriptHistory = [];
     
     // Inject the content script into the active tab to render the UI
     chrome.scripting.executeScript({
@@ -119,12 +126,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Relay transcription text to the content script in the active tab (ADV-012)
-  if (message.action === 'captionText' && currentTabId !== null) {
-    chrome.tabs.sendMessage(currentTabId, {
-      action: 'showCaption',
+  if (message.action === 'captionText') {
+    transcriptHistory.push({
       text: message.text,
-      fontSize: currentFontSize
-    }).catch(() => {}); // ignore errors if tab closed
+      start: message.start !== undefined ? message.start : null,
+      end: message.end !== undefined ? message.end : null
+    });
+    if (currentTabId !== null) {
+      chrome.tabs.sendMessage(currentTabId, {
+        action: 'showCaption',
+        text: message.text,
+        fontSize: currentFontSize
+      }).catch(() => {}); // ignore errors if tab closed
+    }
     if (sendResponse) sendResponse({ success: true });
     return true;
   }
