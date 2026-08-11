@@ -1,7 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
   const languageSelect = document.getElementById('languageSelect');
+
   const fontSizeSelect = document.getElementById('fontSizeSelect');
   const translateCheckbox = document.getElementById('translateCheckbox');
+  const serverUrlInput = document.getElementById('serverUrl');
+
   const toggleBtn = document.getElementById('toggleBtn');
   const statusDiv = document.getElementById('status');
 
@@ -10,6 +13,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (message.action === 'captureStopped') {
       updateUI(false);
       statusDiv.textContent = message.error ? `Status: Stopped (${message.error})` : 'Status: Disconnected';
+    }
+  });
+
+
+  // Load saved server URL
+  chrome.storage.local.get(['serverUrl'], (result) => {
+    if (result.serverUrl) {
+      serverUrlInput.value = result.serverUrl;
     }
   });
 
@@ -70,6 +81,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedLanguage = languageSelect.value;
     const selectedFontSize = parseInt(fontSizeSelect.value, 10);
     const selectedTask = translateCheckbox.checked ? 'translate' : 'transcribe';
+    const serverUrl = serverUrlInput.value;
+    
+    // Save to storage
+    chrome.storage.local.set({ serverUrl: serverUrl });
+
 
     if (!isCurrentlyActive) {
       // Query active tab
@@ -80,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       chrome.runtime.sendMessage(
-        { action: 'start', language: selectedLanguage, fontSize: selectedFontSize, task: selectedTask, tabId: tab.id },
+        { action: 'start', language: selectedLanguage, fontSize: selectedFontSize, task: selectedTask, serverUrl: serverUrl, tabId: tab.id },
         (response) => {
           if (chrome.runtime.lastError) {
             statusDiv.textContent = 'Status: Error starting';

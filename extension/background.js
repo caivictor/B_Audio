@@ -2,6 +2,7 @@ let isCapturing = false;
 let currentLanguage = 'es';
 let currentFontSize = 24;
 let currentTask = 'transcribe';
+let currentServerUrl = 'ws://192.168.0.30:8000/transcribe';
 let currentTabId = null;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -28,7 +29,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     currentLanguage = message.language || 'es';
     currentFontSize = message.fontSize || 24;
     currentTask = message.task || 'transcribe';
+    currentServerUrl = message.serverUrl || 'ws://192.168.0.30:8000/transcribe';
     currentTabId = message.tabId;
+    
+    // Inject the content script into the active tab to render the UI
+    chrome.scripting.executeScript({
+      target: { tabId: currentTabId },
+      files: ['content.js']
+    }).catch(err => console.error("Failed to inject content script", err));
 
     chrome.tabCapture.getMediaStreamId({ targetTabId: currentTabId }, async (streamId) => {
       if (chrome.runtime.lastError || !streamId) {
@@ -64,7 +72,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           streamId,
           language: currentLanguage,
           fontSize: currentFontSize,
-          task: currentTask
+          task: currentTask,
+          serverUrl: currentServerUrl
         });
 
         isCapturing = true;
@@ -107,3 +116,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.runtime.sendMessage(message).catch(() => {});
   }
 });
+
+  // Relay transcription text to the content script in the active tab
+  if (message.action === 'captionText' && currentTabId !== null) {
+    chrome.tabs.sendMessage(currentTabId, {
+      action: 'showCaption',
+      text: message.text,
+      fontSize: currentFontSize
+    }).catch(() => {}); // ignore errors if tab closed
+  }

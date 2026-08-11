@@ -18,7 +18,7 @@ chrome.runtime.sendMessage({ action: 'offscreenReady' });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'startCapture') {
-    startCapture(message.streamId, message.language, message.fontSize, message.task);
+    startCapture(message.streamId, message.language, message.fontSize, message.task, message.serverUrl);
   } else if (message.action === 'stopCapture') {
     stopCapture();
   } else if (message.action === 'updateConfig') {
@@ -44,11 +44,12 @@ function handleWsDisconnect(errorMsg) {
   });
 }
 
-async function startCapture(streamId, language, fontSize, task) {
+async function startCapture(streamId, language, fontSize, task, serverUrl) {
   stopCapture(); // Clean up any existing capture session
   currentLanguage = language || 'es';
   currentFontSize = fontSize || 24;
   currentTask = task || 'transcribe';
+  const targetUrl = serverUrl || 'ws://192.168.0.30:8000/transcribe';
 
   try {
     // 1. Obtain MediaStream from Chrome tab capture streamId FIRST (DEF-007)
@@ -70,8 +71,8 @@ async function startCapture(streamId, language, fontSize, task) {
       };
     }
 
-    // 2. Connect WebSocket to local client only after media stream is acquired
-    ws = new WebSocket('ws://localhost:8765');
+    // 2. Connect WebSocket directly to Remote STT Server
+    ws = new WebSocket(targetUrl);
     setupWebSocketHandlers();
 
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
