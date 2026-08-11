@@ -59,6 +59,9 @@ async def transcribe_websocket(websocket: WebSocket):
     await websocket.accept()
     logger.info("Client connected to /transcribe endpoint.")
 
+    # Dynamic VRAM check & recovery on new connection
+    stt_service.check_vram_and_reload()
+
     # Isolated speaker diarization state per connection (DEF-018)
     session_speaker_state = SpeakerState()
 

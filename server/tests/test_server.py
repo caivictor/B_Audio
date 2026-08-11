@@ -3,7 +3,7 @@ Unit tests for Remote STT Server API endpoints and transcription service.
 """
 import numpy as np
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from server.main import app
 from server.stt import STTService, stt_service
@@ -357,4 +357,126 @@ def test_stt_service_timestamps_accumulate_across_chunks():
         assert res2["text"] == "[Speaker 1]: Second chunk"
         assert res2["start"] == 2.2  # 2.0 + 0.2
         assert res2["end"] == 4.5    # 2.0 + 2.5
+
+
+def test_vram_check_low_memory_fallback():
+    """
+    Test that STTService falls back to device="cpu" and compute_type="int8"
+    when pynvml detects less than 2GB free VRAM (< 2 * 1024**3 bytes).
+    """
+    stt = STTService(model_size="tiny")
+    stt.model = None
+
+    class MockMemoryInfo:
+        free = 1 * 1024 * 1024 * 1024  # 1 GB free VRAM (< 2GB)
+
+    with patch("pynvml.nvmlInit"), \
+         patch("pynvml.nvmlDeviceGetHandleByIndex"), \
+         patch("pynvml.nvmlDeviceGetMemoryInfo", return_value=MockMemoryInfo()), \
+         patch("pynvml.nvmlShutdown"), \
+         patch("server.stt.WhisperModel") as mock_whisper:
+
+        stt.load_model()
+
+        assert stt.device == "cpu"
+        assert stt.compute_type == "int8"
+        mock_whisper.assert_called_once_with("tiny", device="cpu", compute_type="int8")
+
+
+def test_vram_check_sufficient_memory_cuda():
+    """
+    Test that STTService selects device="cuda" and compute_type="float16"
+    when pynvml detects at least 2GB free VRAM (>= 2 * 1024**3 bytes).
+    """
+    stt = STTService(model_size="tiny")
+    stt.model = None
+
+    class MockMemoryInfo:
+        free = 4 * 1024 * 1024 * 1024  # 4 GB free VRAM (>= 2GB)
+
+    with patch("pynvml.nvmlInit"), \
+         patch("pynvml.nvmlDeviceGetHandleByIndex"), \
+         patch("pynvml.nvmlDeviceGetMemoryInfo", return_value=MockMemoryInfo()), \
+         patch("pynvml.nvmlShutdown"), \
+         patch("server.stt.WhisperModel") as mock_whisper:
+
+        stt.load_model()
+
+        assert stt.device == "cuda"
+        assert stt.compute_type == "float16"
+        mock_whisper.assert_called_once_with("tiny", device="cuda", compute_type="float16")
+
+
+def test_dynamic_vram_reload_recovery_to_gpu():
+    """
+    Test dynamic reloading: when model is on CPU and VRAM becomes >= 2GB,
+    check_vram_and_reload() unloads the model and reloads it on GPU.
+    """
+    stt = STTService(model_size="tiny")
+    stt.model = MagicMock()
+    stt.device = "cpu"
+    stt.compute_type = "int8"
+
+    class MockMemoryInfo:
+        free = 3 * 1024 * 1024 * 1024  # 3 GB free VRAM
+
+    with patch("pynvml.nvmlInit"), \
+         patch("pynvml.nvmlDeviceGetHandleByIndex"), \
+         patch("pynvml.nvmlDeviceGetMemoryInfo", return_value=MockMemoryInfo()), \
+         patch("pynvml.nvmlShutdown"), \
+         patch("server.stt.WhisperModel") as mock_whisper:
+
+        reloaded = stt.check_vram_and_reload()
+
+        assert reloaded is True
+        assert stt.device == "cuda"
+        assert stt.compute_type == "float16"
+        mock_whisper.assert_called_once_with("tiny", device="cuda", compute_type="float16")
+
+
+def test_vram_check_pynvml_exception_fallback():
+    """
+    Test that STTService defaults gracefully to CPU if pynvml raises an Exception.
+    """
+    stt = STTService(model_size="tiny")
+    stt.model = None
+
+    with patch("pynvml.nvmlInit", side_effect=Exception("NVML driver error")), \
+         patch("server.stt.WhisperModel") as mock_whisper:
+
+        stt.load_model()
+
+        assert stt.device == "cpu"
+        assert stt.compute_type == "int8"
+        mock_whisper.assert_called_once_with("tiny", device="cpu", compute_type="int8")
+
+
+def test_cuda_load_failure_fallback_to_cpu():
+    """
+    Test that if CUDA initialization raises an Exception despite >= 2GB VRAM,
+    load_model() catches it and falls back to CPU int8.
+    """
+    stt = STTService(model_size="tiny")
+    stt.model = None
+
+    class MockMemoryInfo:
+        free = 4 * 1024 * 1024 * 1024  # 4 GB free VRAM
+
+    def mock_whisper_side_effect(model_size, device, compute_type):
+        if device == "cuda":
+            raise RuntimeError("CUDA device out of memory")
+        return MagicMock()
+
+    with patch("pynvml.nvmlInit"), \
+         patch("pynvml.nvmlDeviceGetHandleByIndex"), \
+         patch("pynvml.nvmlDeviceGetMemoryInfo", return_value=MockMemoryInfo()), \
+         patch("pynvml.nvmlShutdown"), \
+         patch("server.stt.WhisperModel", side_effect=mock_whisper_side_effect) as mock_whisper:
+
+        stt.load_model()
+
+        assert stt.device == "cpu"
+        assert stt.compute_type == "int8"
+        assert mock_whisper.call_count == 2
+
 
