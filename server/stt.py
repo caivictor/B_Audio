@@ -26,12 +26,14 @@ class SpeakerState:
         self.last_audio_had_speech: bool = False
         self.time_since_last_speech_end: float = 0.0
         self.last_segment_end_time: float = 0.0
+        self.total_audio_processed: float = 0.0
 
     def reset(self) -> None:
         self.current_speaker = 1
         self.last_audio_had_speech = False
         self.time_since_last_speech_end = 0.0
         self.last_segment_end_time = 0.0
+        self.total_audio_processed = 0.0
 
     def toggle_speaker(self) -> None:
         self.current_speaker = 2 if self.current_speaker == 1 else 1
@@ -188,9 +190,10 @@ class STTService:
         language: str | None = None,
         task: str = "transcribe",
         speaker_state: SpeakerState | None = None
-    ) -> str:
+    ) -> dict[str, str | float]:
         """
         Transcribes numpy float32 audio array (16kHz mono).
+        Returns a dictionary with 'text', 'start', and 'end' session timestamps.
         """
         state = speaker_state if speaker_state is not None else self.speaker_state
 
@@ -222,6 +225,7 @@ class STTService:
         is_silent = audio_rms < self.silence_energy_threshold
         sample_rate = 16000
         chunk_duration = len(audio_data) / sample_rate if len(audio_data) > 0 else 0.0
+        base_offset = state.total_audio_processed
 
         try:
             segments_iter, _ = self.model.transcribe(audio_data, beam_size=1, condition_on_previous_text=False, **kwargs)
@@ -235,10 +239,12 @@ class STTService:
                 segments = list(segments_iter)
             except Exception as retry_err:
                 logger.error(f"Error during fallback transcription inference: {retry_err}")
-                return ""
+                state.total_audio_processed += chunk_duration
+                return {"text": "", "start": round(base_offset, 3), "end": round(base_offset + chunk_duration, 3)}
         except Exception as e:
             logger.error(f"Error during transcription inference: {e}")
-            return ""
+            state.total_audio_processed += chunk_duration
+            return {"text": "", "start": round(base_offset, 3), "end": round(base_offset + chunk_duration, 3)}
 
         valid_segments = [s for s in segments if s.text and s.text.strip()]
         if not valid_segments:
@@ -246,7 +252,12 @@ class STTService:
                 state.last_audio_had_speech = False
             if state.last_segment_end_time > 0.0 or state.time_since_last_speech_end > 0.0:
                 state.time_since_last_speech_end += chunk_duration
-            return ""
+            state.total_audio_processed += chunk_duration
+            return {
+                "text": "",
+                "start": round(base_offset, 3),
+                "end": round(base_offset + chunk_duration, 3)
+            }
 
         tagged_segments = []
         prev_seg_end = None
@@ -269,12 +280,22 @@ class STTService:
 
             prev_seg_end = s.end
 
+        first_seg = valid_segments[0]
         last_seg = valid_segments[-1]
         state.last_audio_had_speech = True
         state.time_since_last_speech_end = max(0.0, chunk_duration - last_seg.end)
         state.last_segment_end_time = last_seg.end
 
-        return " ".join(tagged_segments)
+        abs_start = round(base_offset + first_seg.start, 3)
+        abs_end = round(base_offset + last_seg.end, 3)
+
+        state.total_audio_processed += chunk_duration
+
+        return {
+            "text": " ".join(tagged_segments),
+            "start": abs_start,
+            "end": abs_end
+        }
 
 
 # Global service instance
