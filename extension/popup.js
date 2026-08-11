@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Load saved server URL
   chrome.storage.local.get(['serverUrl'], (result) => {
-    if (result.serverUrl) {
+    if (result.serverUrl && serverUrlInput) {
       serverUrlInput.value = result.serverUrl;
     }
   });
@@ -81,13 +81,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedLanguage = languageSelect.value;
     const selectedFontSize = parseInt(fontSizeSelect.value, 10);
     const selectedTask = translateCheckbox.checked ? 'translate' : 'transcribe';
-    const serverUrl = serverUrlInput.value;
+    const serverUrl = serverUrlInput ? serverUrlInput.value.trim() : '';
     
     // Save to storage
-    chrome.storage.local.set({ serverUrl: serverUrl });
-
+    if (serverUrlInput) {
+      chrome.storage.local.set({ serverUrl: serverUrl });
+    }
 
     if (!isCurrentlyActive) {
+      if (!serverUrl.startsWith('ws://') && !serverUrl.startsWith('wss://')) {
+        statusDiv.textContent = 'Status: Error - URL must start with ws:// or wss://';
+        return;
+      }
+
       // Query active tab
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab) {

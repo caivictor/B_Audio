@@ -3,40 +3,91 @@
 if (!window.__webCaptionerInitialized) {
   window.__webCaptionerInitialized = true;
   
-  const container = document.createElement('div');
-  container.id = 'webcaptioner-overlay';
-  Object.assign(container.style, {
+  // Host element for Shadow DOM encapsulation (ADV-017)
+  const host = document.createElement('div');
+  host.id = 'webcaptioner-host';
+  Object.assign(host.style, {
     position: 'fixed',
-    bottom: '10%',
+    bottom: '0',
     left: '0',
     width: '100%',
-    display: 'flex',
-    justifyContent: 'center',
-    pointerEvents: 'none',
+    height: '0',
+    overflow: 'visible',
     zIndex: '2147483647',
+    pointerEvents: 'none',
+    margin: '0',
+    padding: '0',
+    border: 'none'
   });
+
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  // Styles isolated inside Shadow DOM (ADV-016, ADV-017)
+  const style = document.createElement('style');
+  style.textContent = `
+    :host {
+      all: initial;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 0;
+      overflow: visible;
+      z-index: 2147483647;
+      pointer-events: none;
+    }
+    #webcaptioner-overlay {
+      position: fixed;
+      bottom: 10%;
+      left: 0;
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 2147483647;
+      box-sizing: border-box;
+    }
+    #webcaptioner-text-bg {
+      background-color: rgba(18, 18, 24, 0.82);
+      padding: 10px 20px;
+      border-radius: 12px;
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      max-width: 80%;
+      max-height: 70vh;
+      overflow-y: auto;
+      word-wrap: break-word;
+      box-sizing: border-box;
+      line-height: 1.4;
+      text-shadow: -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0px 0px 4px #000;
+      display: none;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
+  `;
+  shadow.appendChild(style);
+
+  const container = document.createElement('div');
+  container.id = 'webcaptioner-overlay';
 
   const textBg = document.createElement('div');
   textBg.id = 'webcaptioner-text-bg';
-  Object.assign(textBg.style, {
-    backgroundColor: 'rgba(18, 18, 24, 0.82)',
-    padding: '10px 20px',
-    borderRadius: '12px',
-    color: 'white',
-    fontFamily: 'sans-serif',
-    fontSize: '24px',
-    fontWeight: 'bold',
-    textAlign: 'center',
-    maxWidth: '80%',
-    wordWrap: 'break-word',
-    // High contrast black stroke outline
-    textShadow: '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, 0px 0px 4px #000',
-    display: 'none',
-    boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
-  });
 
   container.appendChild(textBg);
-  document.body.appendChild(container);
+  shadow.appendChild(container);
+
+  // Attach host element to document body or fullscreen element (ADV-015)
+  function attachHost() {
+    const target = document.fullscreenElement || document.body;
+    if (target && host.parentNode !== target) {
+      target.appendChild(host);
+    }
+  }
+
+  document.addEventListener('fullscreenchange', attachHost);
+  attachHost();
 
   let hideTimeout = null;
 
@@ -55,13 +106,19 @@ if (!window.__webCaptionerInitialized) {
   function parseSpeakerTags(text) {
     if (!text) return "";
     // Escape HTML to prevent injection
-    let safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    let safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     
     const regex = /\[(Speaker\s*[^\]]+)\]:/gi;
-    return safeText.replace(regex, (match, label) => {
+    safeText = safeText.replace(regex, (match, label) => {
       const color = getSpeakerColor(label);
       return `<br><span style="color: ${color}"><b>[${label}]:</b></span>`;
-    }).replace(/^<br>/, ''); // Remove leading BR if it's the very first tag
+    });
+
+    // Clean up newlines so \n[Speaker X] doesn't cause <br><br> (ADV-019)
+    safeText = safeText.replace(/\n<br>/g, '<br>').replace(/<br>\n/g, '<br>').replace(/\n/g, '<br>');
+
+    // Remove leading <br> tags
+    return safeText.replace(/^(<br>)+/, '');
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -72,6 +129,7 @@ if (!window.__webCaptionerInitialized) {
           textBg.style.fontSize = `${msg.fontSize}px`;
         }
         textBg.style.display = 'block';
+        textBg.scrollTop = textBg.scrollHeight;
 
         clearTimeout(hideTimeout);
         hideTimeout = setTimeout(() => {

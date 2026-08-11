@@ -6,6 +6,7 @@ let pcmBuffer = [];
 let currentLanguage = 'es';
 let currentFontSize = 24;
 let currentTask = 'transcribe';
+let currentServerUrl = 'ws://192.168.0.30:8000/transcribe';
 let isReconnecting = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 3;
@@ -49,7 +50,11 @@ async function startCapture(streamId, language, fontSize, task, serverUrl) {
   currentLanguage = language || 'es';
   currentFontSize = fontSize || 24;
   currentTask = task || 'transcribe';
-  const targetUrl = serverUrl || 'ws://192.168.0.30:8000/transcribe';
+  currentServerUrl = serverUrl || 'ws://192.168.0.30:8000/transcribe';
+
+  if (!currentServerUrl.startsWith('ws://') && !currentServerUrl.startsWith('wss://')) {
+    throw new Error('Server URL must start with ws:// or wss://');
+  }
 
   try {
     // 1. Obtain MediaStream from Chrome tab capture streamId FIRST (DEF-007)
@@ -72,7 +77,7 @@ async function startCapture(streamId, language, fontSize, task, serverUrl) {
     }
 
     // 2. Connect WebSocket directly to Remote STT Server
-    ws = new WebSocket(targetUrl);
+    ws = new WebSocket(currentServerUrl);
     setupWebSocketHandlers();
 
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -132,7 +137,7 @@ function setupWebSocketHandlers() {
   if (!ws) return;
 
   ws.onopen = () => {
-    console.log('WebSocket connected to local client.');
+    console.log('WebSocket connected to server.');
     reconnectAttempts = 0;
     isReconnecting = false;
     // Send initial config message
@@ -143,6 +148,25 @@ function setupWebSocketHandlers() {
       task: currentTask
     };
     ws.send(JSON.stringify(config));
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data && data.text !== undefined) {
+        chrome.runtime.sendMessage({
+          action: 'captionText',
+          text: data.text
+        }).catch(() => {});
+      }
+    } catch (e) {
+      if (typeof event.data === 'string' && event.data.trim()) {
+        chrome.runtime.sendMessage({
+          action: 'captionText',
+          text: event.data
+        }).catch(() => {});
+      }
+    }
   };
 
   ws.onerror = (err) => {
@@ -157,7 +181,7 @@ function setupWebSocketHandlers() {
       console.log(`Attempting WebSocket reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
       setTimeout(() => {
         if (mediaStream) {
-          ws = new WebSocket('ws://localhost:8765');
+          ws = new WebSocket(currentServerUrl);
           setupWebSocketHandlers();
         }
       }, 1000);

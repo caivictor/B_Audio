@@ -52,7 +52,7 @@
       color: #a6adc8;
     }
 
-    select, button {
+    select, input[type="text"], button {
       width: 100%;
       padding: 8px 12px;
       border-radius: 6px;
@@ -63,7 +63,7 @@
       box-sizing: border-box;
     }
 
-    select:focus, button:focus {
+    select:focus, input[type="text"]:focus, button:focus {
       outline: none;
       border-color: #cba6f7;
     }
@@ -126,6 +126,10 @@
       <option value="32">32 px (Extra Large)</option>
       <option value="36">36 px (Huge)</option>
     </select>
+  </div>
+  <div class="form-group">
+    <label for="serverUrl">Server URL</label>
+    <input type="text" id="serverUrl" value="ws://192.168.0.30:8000/transcribe" placeholder="ws://localhost:8000/transcribe">
   </div>
   <div class="form-group checkbox-group">
     <label for="translateCheckbox" class="checkbox-label">

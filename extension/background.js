@@ -89,6 +89,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'stop') {
     isCapturing = false;
+    currentTabId = null;
     chrome.runtime.sendMessage({ action: 'stopCapture' });
 
     chrome.offscreen.hasDocument().then((hasDoc) => {
@@ -105,6 +106,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'captureStopped') {
     isCapturing = false;
+    currentTabId = null;
     chrome.offscreen.hasDocument().then((hasDoc) => {
       if (hasDoc) {
         chrome.offscreen.closeDocument().catch((err) => {
@@ -115,13 +117,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Broadcast captureStopped to update popup UI
     chrome.runtime.sendMessage(message).catch(() => {});
   }
-});
 
-  // Relay transcription text to the content script in the active tab
+  // Relay transcription text to the content script in the active tab (ADV-012)
   if (message.action === 'captionText' && currentTabId !== null) {
     chrome.tabs.sendMessage(currentTabId, {
       action: 'showCaption',
       text: message.text,
       fontSize: currentFontSize
     }).catch(() => {}); // ignore errors if tab closed
+    if (sendResponse) sendResponse({ success: true });
+    return true;
   }
+});
+
+function cleanupCapture() {
+  isCapturing = false;
+  currentTabId = null;
+  chrome.runtime.sendMessage({ action: 'stopCapture' }).catch(() => {});
+  chrome.offscreen.hasDocument().then((hasDoc) => {
+    if (hasDoc) {
+      chrome.offscreen.closeDocument().catch((err) => {
+        console.error('Error closing offscreen document:', err);
+      });
+    }
+  }).catch(() => {});
+}
+
+// Listen for tab removal (ADV-018)
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === currentTabId && isCapturing) {
+    console.log(`Captured tab ${tabId} closed. Stopping capture.`);
+    cleanupCapture();
+    chrome.runtime.sendMessage({
+      action: 'captureStopped',
+      error: 'Tab was closed'
+    }).catch(() => {});
+  }
+});
+
+// Listen for tab updates/refreshes (ADV-018)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (tabId === currentTabId && isCapturing && changeInfo.status === 'complete') {
+    console.log(`Captured tab ${tabId} refreshed/navigated. Re-injecting content script.`);
+    chrome.scripting.executeScript({
+      target: { tabId: currentTabId },
+      files: ['content.js']
+    }).catch((err) => console.error("Failed to re-inject content script:", err));
+  }
+});
