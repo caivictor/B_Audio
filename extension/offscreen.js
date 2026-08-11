@@ -156,7 +156,9 @@ function setupWebSocketHandlers() {
       if (data && data.text !== undefined) {
         chrome.runtime.sendMessage({
           action: 'captionText',
-          text: data.text
+          text: data.text,
+          start: data.start !== undefined ? data.start : null,
+          end: data.end !== undefined ? data.end : null
         }).catch(() => {});
       }
     } catch (e) {

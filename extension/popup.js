@@ -1,12 +1,48 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const languageSelect = document.getElementById('languageSelect');
+function formatTimestamp(seconds) {
+  if (typeof seconds !== 'number' || isNaN(seconds)) {
+    return '00:00.000';
+  }
+  const totalMs = Math.round(seconds * 1000);
+  const hrs = Math.floor(totalMs / 3600000);
+  const mins = Math.floor((totalMs % 3600000) / 60000);
+  const secs = Math.floor((totalMs % 60000) / 1000);
+  const ms = totalMs % 1000;
 
-  const fontSizeSelect = document.getElementById('fontSizeSelect');
-  const translateCheckbox = document.getElementById('translateCheckbox');
-  const serverUrlInput = document.getElementById('serverUrl');
+  const pad = (num, size) => num.toString().padStart(size, '0');
 
-  const toggleBtn = document.getElementById('toggleBtn');
-  const statusDiv = document.getElementById('status');
+  if (hrs > 0) {
+    return `${pad(hrs, 2)}:${pad(mins, 2)}:${pad(secs, 2)}.${pad(ms, 3)}`;
+  }
+  return `${pad(mins, 2)}:${pad(secs, 2)}.${pad(ms, 3)}`;
+}
+
+function formatTranscript(history) {
+  if (!Array.isArray(history) || history.length === 0) {
+    return '';
+  }
+  return history.map((item) => {
+    if (typeof item === 'string') {
+      return item;
+    }
+    const text = item.text || '';
+    if (item.start !== undefined && item.start !== null && item.end !== undefined && item.end !== null) {
+      return `[${formatTimestamp(item.start)} --> ${formatTimestamp(item.end)}] ${text}`;
+    }
+    return text;
+  }).join('\n');
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const languageSelect = document.getElementById('languageSelect');
+
+    const fontSizeSelect = document.getElementById('fontSizeSelect');
+    const translateCheckbox = document.getElementById('translateCheckbox');
+    const serverUrlInput = document.getElementById('serverUrl');
+
+    const toggleBtn = document.getElementById('toggleBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const statusDiv = document.getElementById('status');
 
   // Listen for unexpected capture stopped / disconnect events
   chrome.runtime.onMessage.addListener((message) => {
@@ -125,4 +161,34 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
   });
-});
+
+  if (downloadBtn) {
+    downloadBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: 'getTranscriptHistory' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(chrome.runtime.lastError);
+          return;
+        }
+        const history = response?.transcriptHistory || [];
+        if (history.length === 0) {
+          return;
+        }
+        const formattedText = formatTranscript(history);
+        const blob = new Blob([formattedText], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'transcript.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
+    });
+  }
+  });
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { formatTimestamp, formatTranscript };
+}
