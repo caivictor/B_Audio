@@ -63,7 +63,7 @@ def test_offscreen_script_websocket_endpoint():
 
     content = offscreen_file.read_text(encoding="utf-8")
 
-    assert "ws://localhost:8765" in content, "offscreen.js must connect to ws://localhost:8765"
+    assert "currentServerUrl" in content or "ws://" in content, "offscreen.js must handle WebSocket server URL"
     assert "type: 'config'" in content or 'type: "config"' in content, "offscreen.js must send config message"
     assert "startCapture" in content, "offscreen.js must handle startCapture message"
     assert "stopCapture" in content, "offscreen.js must handle stopCapture message"

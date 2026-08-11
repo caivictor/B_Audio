@@ -356,6 +356,15 @@ class TransparentOverlayWindow(QWidget):
         import os
         os._exit(0)  # Force kill to prevent any lingering asyncio/websocket threads
 
+
+    def closeEvent(self, event):
+        """Ensure the entire application exits when the overlay is closed."""
+        super().closeEvent(event)
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
+        import os
+        os._exit(0) # Force kill to prevent any lingering asyncio/websocket threads
+
     def keyPressEvent(self, event):
         """Close on Escape key"""
         from PyQt6.QtCore import Qt

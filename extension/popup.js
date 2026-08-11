@@ -186,6 +186,17 @@ if (typeof document !== 'undefined') {
       });
     });
   }
+
+  const optionsBtn = document.getElementById('optionsBtn');
+  if (optionsBtn) {
+    optionsBtn.addEventListener('click', () => {
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+      } else if (typeof window !== 'undefined') {
+        window.open('options.html');
+      }
+    });
+  }
   });
 }
 

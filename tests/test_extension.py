@@ -37,6 +37,8 @@ def test_extension_files_exist():
         "extension/background.js",
         "extension/offscreen.html",
         "extension/offscreen.js",
+        "extension/options.html",
+        "extension/options.js",
     ]
     for rel_path in required_files:
         assert Path(rel_path).exists(), f"File missing: {rel_path}"
@@ -231,3 +233,63 @@ def test_phase5_popup_transcript_formatting():
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     output = result.stdout.strip()
     assert output == "[00:01.500 --> 00:04.200] [Speaker 1]: Hello", f"Unexpected formatted output: {output}"
+
+
+def test_phase6_options_files_and_manifest():
+    """Phase 6: Verify options.html, options.js exist and options_ui is registered in manifest.json."""
+    options_html = Path("extension/options.html")
+    options_js = Path("extension/options.js")
+    manifest_path = Path("extension/manifest.json")
+
+    assert options_html.exists(), "extension/options.html must exist"
+    assert options_js.exists(), "extension/options.js must exist"
+
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    options_ui = data.get("options_ui", {})
+    assert options_ui.get("page") == "options.html", "options_ui page must be options.html"
+    assert options_ui.get("open_in_tab") is True, "options_ui open_in_tab must be True"
+
+
+def test_phase6_options_page_ui_controls():
+    """Phase 6: Verify options.html and options.js contain font, color, and stroke controls."""
+    html_content = Path("extension/options.html").read_text(encoding="utf-8")
+    js_content = Path("extension/options.js").read_text(encoding="utf-8")
+
+    # Font Family control
+    assert 'id="fontFamilySelect"' in html_content
+    assert "fontFamily" in js_content
+
+    # Subtitle Text Color control
+    assert 'id="textColorPicker"' in html_content
+    assert "textColor" in js_content
+
+    # Stroke Thickness control
+    assert 'id="strokeThicknessSlider"' in html_content
+    assert "strokeThickness" in js_content
+
+    # Storage interaction
+    assert "chrome.storage.local" in js_content
+
+
+def test_phase6_content_dynamic_styles():
+    """Phase 6: Verify content.js loads, updates, and listens for fontFamily, textColor, and strokeThickness."""
+    content_code = Path("extension/content.js").read_text(encoding="utf-8")
+
+    assert "fontFamily" in content_code
+    assert "textColor" in content_code
+    assert "strokeThickness" in content_code
+    assert "textShadow" in content_code
+    assert "chrome.storage.local" in content_code
+    assert "chrome.storage.onChanged" in content_code
+
+
+def test_phase6_background_relays_options():
+    """Phase 6: Verify background.js relays customization settings to content script."""
+    bg_code = Path("extension/background.js").read_text(encoding="utf-8")
+
+    assert "fontFamily" in bg_code
+    assert "textColor" in bg_code
+    assert "strokeThickness" in bg_code
+

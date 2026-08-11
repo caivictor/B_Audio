@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebCaptioner Options</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 500px;
+      margin: 32px auto;
+      padding: 24px;
+      background-color: #1e1e2e;
+      color: #cdd6f4;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    h1 {
+      font-size: 20px;
+      margin-top: 0;
+      margin-bottom: 20px;
+      color: #cba6f7;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #a6adc8;
+    }
+
+    select, input[type="text"], input[type="color"], input[type="range"] {
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    select {
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #45475a;
+      background-color: #313244;
+      color: #cdd6f4;
+      font-size: 14px;
+    }
+
+    .color-picker-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    input[type="color"] {
+      -webkit-appearance: none;
+      border: none;
+      width: 48px;
+      height: 36px;
+      border-radius: 6px;
+      cursor: pointer;
+      background: none;
+    }
+
+    input[type="color"]::-webkit-color-swatch-wrapper {
+      padding: 0;
+    }
+
+    input[type="color"]::-webkit-color-swatch {
+      border: 1px solid #45475a;
+      border-radius: 6px;
+    }
+
+    .hex-display {
+      font-family: monospace;
+      font-size: 14px;
+      color: #cdd6f4;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      accent-color: #89b4fa;
+    }
+
+    .slider-value {
+      font-weight: bold;
+      width: 36px;
+      text-align: right;
+    }
+
+    .preview-container {
+      margin-top: 24px;
+      padding: 20px;
+      background-color: #11111b;
+      border-radius: 8px;
+      border: 1px solid #45475a;
+      text-align: center;
+    }
+
+    .preview-label {
+      font-size: 12px;
+      color: #a6adc8;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    #previewBox {
+      background-color: rgba(18, 18, 24, 0.82);
+      padding: 12px 20px;
+      border-radius: 12px;
+      display: inline-block;
+      font-size: 24px;
+      font-weight: bold;
+      max-width: 90%;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      line-height: 1.4;
+    }
+
+    .status {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #a6e3a1;
+      min-height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <h1>WebCaptioner Subtitle Customization</h1>
+
+  <div class="form-group">
+    <label for="fontFamilySelect">Font Family</label>
+    <select id="fontFamilySelect">
+      <option value='-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'>System Default (Sans-Serif)</option>
+      <option value='Arial, sans-serif'>Arial</option>
+      <option value='sans-serif'>Sans-Serif Generic</option>
+      <option value='monospace'>Monospace</option>
+      <option value='Georgia, serif'>Georgia (Serif)</option>
+      <option value='"Comic Sans MS", cursive, sans-serif'>Comic Sans</option>
+      <option value='"Impact", sans-serif'>Impact</option>
+    </select>
+  </div>
+
+  <div class="form-group">
+    <label for="textColorPicker">Subtitle Text Color</label>
+    <div class="color-picker-row">
+      <input type="color" id="textColorPicker" value="#ffffff">
+      <span id="hexDisplay" class="hex-display">#ffffff</span>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label for="strokeThicknessSlider">Stroke Thickness</label>
+    <div class="slider-row">
+      <input type="range" id="strokeThicknessSlider" min="0" max="6" step="1" value="2">
+      <span id="strokeThicknessValue" class="slider-value">2px</span>
+    </div>
+  </div>
+
+  <div class="preview-container">
+    <div class="preview-label">Live Preview</div>
+    <div id="previewBox">Sample Subtitle Text</div>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>
