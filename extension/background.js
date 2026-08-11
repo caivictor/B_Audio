@@ -133,11 +133,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       end: message.end !== undefined ? message.end : null
     });
     if (currentTabId !== null) {
-      chrome.tabs.sendMessage(currentTabId, {
-        action: 'showCaption',
-        text: message.text,
-        fontSize: currentFontSize
-      }).catch(() => {}); // ignore errors if tab closed
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(['fontFamily', 'textColor', 'strokeThickness'], (settings) => {
+          chrome.tabs.sendMessage(currentTabId, {
+            action: 'showCaption',
+            text: message.text,
+            fontSize: currentFontSize,
+            fontFamily: settings.fontFamily,
+            textColor: settings.textColor,
+            strokeThickness: settings.strokeThickness
+          }).catch(() => {}); // ignore errors if tab closed
+        });
+      } else {
+        chrome.tabs.sendMessage(currentTabId, {
+          action: 'showCaption',
+          text: message.text,
+          fontSize: currentFontSize
+        }).catch(() => {}); // ignore errors if tab closed
+      }
     }
     if (sendResponse) sendResponse({ success: true });
     return true;

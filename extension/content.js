@@ -91,6 +91,43 @@ if (!window.__webCaptionerInitialized) {
 
   let hideTimeout = null;
 
+  let currentFontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  let currentTextColor = '#ffffff';
+  let currentStrokeThickness = 2;
+
+  function applyCustomStyles(fontFamily, textColor, strokeThickness) {
+    if (fontFamily) currentFontFamily = fontFamily;
+    if (textColor) currentTextColor = textColor;
+    if (strokeThickness !== undefined) currentStrokeThickness = strokeThickness;
+
+    if (textBg) {
+      textBg.style.fontFamily = currentFontFamily;
+      textBg.style.color = currentTextColor;
+      const t = parseInt(currentStrokeThickness, 10);
+      if (t === 0) {
+        textBg.style.textShadow = 'none';
+      } else {
+        textBg.style.textShadow = `-${t}px -${t}px 0 #000, ${t}px -${t}px 0 #000, -${t}px ${t}px 0 #000, ${t}px ${t}px 0 #000, 0px 0px 4px #000`;
+      }
+    }
+  }
+
+  // Load custom styling options from chrome.storage.local
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(['fontFamily', 'textColor', 'strokeThickness'], (items) => {
+      applyCustomStyles(items.fontFamily, items.textColor, items.strokeThickness);
+    });
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local') {
+        const font = changes.fontFamily ? changes.fontFamily.newValue : undefined;
+        const color = changes.textColor ? changes.textColor.newValue : undefined;
+        const stroke = changes.strokeThickness ? changes.strokeThickness.newValue : undefined;
+        applyCustomStyles(font, color, stroke);
+      }
+    });
+  }
+
   function getSpeakerColor(label) {
     const colors = [
       '#ff9999', '#99ccff', '#99ff99', '#ffcc99', '#cc99ff',
@@ -127,6 +164,9 @@ if (!window.__webCaptionerInitialized) {
         textBg.innerHTML = parseSpeakerTags(msg.text);
         if (msg.fontSize) {
           textBg.style.fontSize = `${msg.fontSize}px`;
+        }
+        if (msg.fontFamily || msg.textColor || msg.strokeThickness !== undefined) {
+          applyCustomStyles(msg.fontFamily, msg.textColor, msg.strokeThickness);
         }
         textBg.style.display = 'block';
         textBg.scrollTop = textBg.scrollHeight;
