@@ -1,10 +1,10 @@
-# Personal Space — Build Rules
+# WebCaptioner — Build Rules
 
 These rules apply to every agent working on this project.
 
 ## The job
 
-Build Personal Space exactly as specified in [REQUIREMENTS.md](./REQUIREMENTS.md). That document
+Build WebCaptioner exactly as specified in [REQUIREMENTS.md](./REQUIREMENTS.md). That document
 is the contract: its phases, success criteria and final criteria decide when work is done. When in
 doubt, REQUIREMENTS.md wins.
 
