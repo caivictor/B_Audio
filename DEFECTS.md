@@ -1,4 +1,232 @@
 
+## DEF-046: RelayServer handle_client leaves client WebSocket open and active_client locked after remote STT connection failure
+- Status: OPEN
+- Severity: LOW
+- Found by: adversary (ADV-018)
+- Phase: Final
+
+Steps to reproduce:
+1. Launch `client/main.py` RelayServer with a remote STT URL that is offline or unreachable (e.g. `ws://invalid-host:9999`).
+2. Connect a WebSocket client (e.g. Chrome Extension) to `ws://localhost:8765`.
+3. Wait for RelayServer max connection retry attempts to expire.
+4. Inspect the WebSocket client state and attempt connecting a second client to RelayServer.
+
+Expected: RelayServer sends a close frame to the client WebSocket, resets `self.active_client = None`, and closes the connection cleanly.
+Actual: `RelayServer.handle_client` updates signal status to `Error connecting to STT server` and executes `return` without calling `await websocket.close()`. The client WebSocket is left open in an unclosed state, and `self.active_client` remains set to the dead socket, causing subsequent connection attempts to be rejected with 1008 concurrent client lock error.
+
+History:
+- qa: opened
+
+## DEF-045: Unbounded font size parameters in extension config cause overlay caption distortion
+- Status: OPEN
+- Severity: LOW
+- Found by: adversary (ADV-017)
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome and start captioning on an active web page.
+2. Send an `updateConfig` message or custom config payload with an extreme `fontSize` value (e.g., `fontSize: 200` or `fontSize: 2`).
+3. Observe caption rendering in the in-browser DOM overlay (`content.js`).
+
+Expected: `content.js` validates and clamps `fontSize` within readable subtitle bounds (e.g., 12px to 72px, matching PyQt overlay validation).
+Actual: `content.js` applies `textBg.style.fontSize = '${msg.fontSize}px'` directly without bounds checking, causing extreme font values to distort the overlay layout beyond viewport bounds or render illegible micro-text.
+Screenshot: screenshots/adv-017.png
+
+History:
+- qa: opened
+
+## DEF-044: Offscreen document ignores server keepalive ping messages and fails to respond with pong
+- Status: OPEN
+- Severity: LOW
+- Found by: adversary (ADV-016)
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome and start captioning.
+2. Keep tab audio quiet or idle for longer than `KEEPALIVE_TIMEOUT_SECONDS` (60 seconds) so `server/main.py` dispatches a `{"type": "ping"}` JSON message over WebSocket.
+3. Inspect `offscreen.js` WebSocket message handling.
+
+Expected: `offscreen.js` receives the ping message and responds with `{"type": "pong"}` JSON frame to acknowledge connection liveness.
+Actual: `ws.onmessage` in `offscreen.js` parses incoming JSON but does not check for `data.type === "ping"`. It ignores the ping frame and sends no response, failing keepalive heartbeat verification during extended quiet periods.
+
+History:
+- qa: opened
+
+## DEF-043: Unbounded transcriptHistory array in background service worker causes memory growth and popup IPC latency
+- Status: OPEN
+- Severity: MEDIUM
+- Found by: adversary (ADV-015)
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome and run an extended captioning session producing hundreds or thousands of transcript chunks.
+2. Click extension icon to open popup UI.
+3. Observe background service worker memory and popup UI load latency.
+
+Expected: `background.js` maintains a capped sliding window for `transcriptHistory` or pages response data to keep popup loading fast and keep memory footprint bounded.
+Actual: `background.js` appends every `captionText` entry to `transcriptHistory` without size limits. When popup opens and sends `{ action: 'getStatus' }`, `background.js` serializes and transmits the entire unbounded history array across Chrome IPC, causing high background worker memory consumption and delay opening popup UI.
+
+History:
+- qa: opened
+
+## DEF-042: Rapidly toggling settings or translation mid-stream dumps audio buffer and resets speaker diarization state
+- Status: OPEN
+- Severity: MEDIUM
+- Found by: adversary (ADV-014)
+- Phase: Final
+
+Steps to reproduce:
+1. Start `server/main.py` STT server and begin streaming active audio with multiple speakers.
+2. Open extension popup mid-stream and toggle "Translate to English" checkbox or change settings.
+3. Observe server logs and output transcription.
+
+Expected: Configuration updates modify inference parameters for subsequent audio frames without discarding buffered audio or resetting active speaker history.
+Actual: When `server/main.py` receives a JSON `type: "config"` message mid-stream, it executes `audio_buffer.clear()` and `session_speaker_state.reset()`. Part-second PCM audio chunks currently in the buffer are immediately deleted (causing audio dropouts and missing words), and speaker diarization state resets back to Speaker 1.
+
+History:
+- qa: opened
+
+## DEF-041: Uncleared reconnect timer in offscreen.js spawns duplicate leaking WebSockets on rapid capture start/stop toggling
+- Status: OPEN
+- Severity: HIGH
+- Found by: adversary (ADV-013)
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome and start captioning.
+2. Simulate a WebSocket disconnect in `offscreen.js`.
+3. Rapidly click "Stop Captioning" and "Start Captioning" in extension popup within 1 second while reconnect timer is pending.
+4. Inspect active WebSocket connections in offscreen document.
+
+Expected: Calling `stopCapture()` clears any pending reconnect `setTimeout` so that starting a new capture session creates exactly one active WebSocket connection.
+Actual: `ws.onclose` schedules `setTimeout` for reconnection without saving the timer ID. `stopCapture()` does not clear the timer. When the 1-second timer fires, `if (mediaStream)` evaluates to true because the new session re-initialized `mediaStream`, opening a duplicate second WebSocket connection (`ws = new WebSocket(...)`) in parallel. Both WebSockets stream audio chunks simultaneously, corrupting server session state and triggering session lock rejection.
+
+History:
+- qa: opened
+
+## DEF-040: Speaker tags without trailing colons fail regex matching in Chrome extension content script
+- Status: OPEN
+- Severity: MEDIUM
+- Found by: adversary (ADV-012)
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome and start captioning.
+2. Stream transcription text containing speaker tags without trailing colons (e.g. `[Speaker 1] Hello world` or `[Speaker A] Good morning`) to `content.js`.
+3. Observe caption rendering in `content.js` DOM overlay.
+
+Expected: Extension overlay matches speaker tags regardless of trailing colon presence (matching `client/main.py` behavior) and formats them with speaker color highlighting, bold styling, and line breaks.
+Actual: `content.js` uses regex `/\[(Speaker\s*[^\]]+)\]:/gi` with a mandatory trailing colon. Speaker tags lacking a colon fail to match, causing `[Speaker 1] Hello world` to render as plain white unformatted text without speaker color highlights or line breaks.
+
+History:
+- qa: opened
+
+## DEF-039: Disconnect during WebSocket receive drain loop in server/main.py triggers unhandled Starlette RuntimeError
+- Status: OPEN
+- Severity: HIGH
+- Found by: adversary (ADV-011)
+- Phase: Final
+
+Steps to reproduce:
+1. Start `server/main.py` on port 8000.
+2. Connect a WebSocket client to `ws://127.0.0.1:8000/transcribe`.
+3. Send a binary PCM audio chunk and immediately close the client WebSocket connection while the server is draining incoming messages in `server/main.py`.
+4. Observe server console logs.
+
+Expected: The receive drain loop detects `websocket.disconnect`, exits the receive drain loop cleanly, and closes the session without errors.
+Actual: The `while True` drain loop in `server/main.py` receives `{"type": "websocket.disconnect"}`. Because the disconnect message lacks both `"bytes"` and `"text"` keys, the loop fails to break and calls `websocket.receive()` again. Starlette raises `RuntimeError: Cannot call "receive" once a disconnect message has been received`, dumping an unhandled exception in server logs.
+
+History:
+- qa: opened
+
+## DEF-038: In-browser DOM overlay speaker tag regex requires trailing colon and fails to match tags without colon
+- Status: OPEN
+- Severity: LOW
+- Found by: qa
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome.
+2. Stream audio or send transcription text containing speaker tag without a trailing colon (e.g. `[Speaker 1] Hello world`).
+3. Observe caption rendering in `content.js` overlay versus `client/main.py` overlay.
+
+Expected: `content.js` matches speaker tags regardless of colon presence, consistent with `client/main.py` (`r"\[(Speaker\s*[^\]]+)\]:?"`).
+Actual: `content.js` regex `/\[(Speaker\s*[^\]]+)\]:/gi` requires a colon `:` after `]`, failing to match `[Speaker 1]` and leaving the tag unformatted.
+
+History:
+- qa: opened
+
+## DEF-037: In-browser DOM overlay (content.js) does not color-code speaker dialogue text
+- Status: OPEN
+- Severity: LOW
+- Found by: qa
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome and start captioning on a tab.
+2. Stream multi-speaker audio with speaker tags (e.g. `[Speaker 1]: Hello world [Speaker 2]: Hi there`).
+3. Observe caption styling in the in-browser DOM overlay (`content.js`).
+
+Expected: Speaker dialogue text is rendered in the color assigned to the speaker label, matching `client/main.py` and REQUIREMENTS.md Step 4.
+Actual: `content.js` `parseSpeakerTags` wraps only the tag `[Speaker X]:` inside the colored `<span>`, leaving all spoken dialogue text outside the span in default white.
+
+History:
+- qa: opened
+
+## DEF-036: Stopping captioning in popup leaves stale caption overlay visible on active tab
+- Status: OPEN
+- Severity: MEDIUM
+- Found by: qa
+- Phase: Final
+
+Steps to reproduce:
+1. Load extension into Chrome, open a video tab, and click "Start Captioning".
+2. Stream audio so captions appear in the in-browser DOM overlay (`content.js`).
+3. Open extension popup and click "Stop Captioning".
+4. Observe active video tab overlay.
+
+Expected: The caption overlay box immediately closes/hides when captioning is stopped.
+Actual: `background.js` handles `stop` / `captureStopped` by closing the offscreen document but fails to send `{ action: 'hideCaption' }` to `content.js`. The last displayed caption box remains visible on top of the web page until the 10-second silence timer expires.
+
+History:
+- qa: opened
+
+## DEF-035: Dynamic font size or config changes in popup send text config that unexpectedly clears backend audio buffer and resets speaker diarization state
+- Status: OPEN
+- Severity: MEDIUM
+- Found by: qa
+- Phase: Final
+
+Steps to reproduce:
+1. Start `server/main.py` STT server on port 8000.
+2. Load extension into Chrome, click "Start Captioning", and stream audio with multiple speakers so diarization advances to Speaker 2.
+3. Open extension popup and change the Caption Font Size dropdown (e.g., from 24px to 28px).
+4. Observe STT server logs and subsequent transcription speaker tags.
+
+Expected: Font size update modifies local UI rendering size without triggering a backend audio buffer wipe or speaker diarization state reset.
+Actual: `popup.js` sends `updateConfig` with `fontSize`, which `offscreen.js` sends as a JSON config message to `/transcribe`. `server/main.py` handles text messages by executing `audio_buffer.clear()` and `session_speaker_state.reset()`, wiping buffered audio and resetting speaker tracking back to Speaker 1 mid-conversation.
+
+History:
+- qa: opened
+
+## DEF-034: offscreen.js stopCapture() fails to close WebSockets in CONNECTING state, leaving orphaned background connections
+- Status: OPEN
+- Severity: HIGH
+- Found by: qa
+- Phase: Final
+
+Steps to reproduce:
+1. Load WebCaptioner extension into Chrome.
+2. Open extension popup and click "Start Captioning".
+3. Immediately click "Stop Captioning" while the WebSocket connection in `offscreen.js` is still in `CONNECTING` state (`ws.readyState === 0`).
+4. Inspect background/offscreen WebSocket network activity.
+
+Expected: `stopCapture()` closes the WebSocket connection regardless of whether `readyState` is `OPEN` or `CONNECTING`.
+Actual: `stopCapture()` only checks `if (ws.readyState === WebSocket.OPEN)`, so `ws.close()` is never called when `readyState === CONNECTING`. When the socket completes connecting in the background, `ws.onopen` fires and the orphaned WebSocket remains connected and active in the background.
+
+History:
+- qa: opened
+
 ## DEF-024: Missing serverUrl input in popup.html breaks UI
 - Status: CLOSED
 - Severity: HIGH

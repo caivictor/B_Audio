@@ -108,3 +108,94 @@ What I did: Triggered caption clear via 10-second silence timer _clear_caption()
 Expected: Overlay window becomes completely transparent or hidden during silence.
 Actual: _clear_caption() sets label.setText(""), but QLabel stylesheet padding and background (rgba(18, 18, 24, 0.82)) remain visible as a dark empty box floating on screen.
 Screenshot: screenshots/adv-010.png
+
+Disposition: PENDING
+
+## ADV-011: Disconnect during WebSocket receive drain loop in server/main.py triggers unhandled Starlette RuntimeError
+
+- Session: final
+- Suggested severity: HIGH
+
+What I did: Connected a WebSocket client to ws://127.0.0.1:8000/transcribe, sent a binary PCM audio chunk, and immediately closed the client connection while the server was draining incoming messages in server/main.py.
+Expected: The receive loop detects websocket.disconnect, exits the receive drain loop cleanly, and closes the session without errors.
+Actual: The while True drain loop in server/main.py receives {"type": "websocket.disconnect"}. Because the disconnect message lacks both "bytes" and "text" keys, the loop fails to break and calls websocket.receive() again. Starlette raises RuntimeError: Cannot call "receive" once a disconnect message has been received, dumping an unhandled exception in server logs.
+
+Disposition: ACCEPTED -> DEF-039
+
+## ADV-012: Speaker tags without trailing colons fail regex matching in Chrome extension content script
+
+- Session: final
+- Suggested severity: MEDIUM
+
+What I did: Streamed transcription text containing speaker tags without trailing colons (e.g. [Speaker 1] Hello world or [Speaker A] Good morning) to the Chrome extension content script content.js.
+Expected: Extension overlay matches speaker tags regardless of trailing colon presence (matching client/main.py behavior) and formats them with speaker color highlighting, bold styling, and line breaks.
+Actual: content.js uses regex = /\[(Speaker\s*[^\]]+)\]:/gi with a mandatory trailing colon. Speaker tags lacking a colon fail to match, causing [Speaker 1] Hello world to render as plain white unformatted text without speaker color highlights or line breaks.
+
+Disposition: ACCEPTED -> DEF-040
+
+## ADV-013: Uncleared reconnect timer in offscreen.js spawns duplicate leaking WebSockets on rapid capture start/stop toggling
+
+- Session: final
+- Suggested severity: HIGH
+
+What I did: Simulated a WebSocket connection drop in offscreen.js, then rapidly clicked "Stop Captioning" and "Start Captioning" in the extension popup within 1 second while the reconnect timer was pending.
+Expected: Calling stopCapture() clears any pending reconnect setTimeout so that starting a new capture session creates exactly one active WebSocket connection.
+Actual: ws.onclose schedules setTimeout for reconnection without saving the timer ID. stopCapture() does not clear the timer. When the 1-second timer fires, if (mediaStream) evaluates to true because the new session re-initialized mediaStream, opening a duplicate second WebSocket connection (ws = new WebSocket(...)) in parallel. Both WebSockets stream audio chunks simultaneously, corrupting server session state and triggering session lock rejection.
+
+Disposition: ACCEPTED -> DEF-041
+
+## ADV-014: Rapidly toggling settings or translation mid-stream dumps audio buffer and resets speaker diarization state
+
+- Session: final
+- Suggested severity: MEDIUM
+
+What I did: Rapidly toggled the "Translate to English" checkbox or changed settings in the extension popup while streaming active audio.
+Expected: Configuration updates change inference parameters for subsequent audio frames without discarding already-buffered PCM audio or resetting active speaker history.
+Actual: When server/main.py receives a JSON type: "config" message mid-stream, it executes audio_buffer.clear() and session_speaker_state.reset(). Part-second PCM audio chunks currently in the buffer are immediately deleted (causing audio dropouts and missing words in transcripts), and speaker diarization state resets back to Speaker 1.
+
+Disposition: ACCEPTED -> DEF-042
+
+## ADV-015: Unbounded transcriptHistory array in background service worker causes memory growth and popup IPC latency
+
+- Session: final
+- Suggested severity: MEDIUM
+
+What I did: Ran an extended audio captioning session producing thousands of transcript chunks, then clicked the extension icon to open the popup UI.
+Expected: background.js maintains a capped sliding window for transcript history or pages response data to keep popup loading instantaneous.
+Actual: background.js appends every captionText entry to transcriptHistory without size limits. When the popup opens and sends { action: 'getStatus' }, background.js serializes and transmits the entire unbounded history array across Chrome IPC, causing high background worker memory consumption and noticeable delay when opening the popup UI.
+
+Disposition: ACCEPTED -> DEF-043
+
+## ADV-016: Offscreen document ignores server keepalive ping messages and fails to respond with pong
+
+- Session: final
+- Suggested severity: LOW
+
+What I did: Left the audio stream idle for longer than KEEPALIVE_TIMEOUT_SECONDS (60s) so server/main.py issued a {"type": "ping"} JSON message over the WebSocket connection.
+Expected: offscreen.js receives the ping frame and responds with {"type": "pong"} to confirm bidirectional connection liveness.
+Actual: ws.onmessage in offscreen.js parses message JSON but does not check for data.type === "ping". It ignores the message and sends no pong response, preventing proper keepalive heartbeat acknowledgment during extended quiet periods.
+
+Disposition: ACCEPTED -> DEF-044
+
+## ADV-017: Unbounded font size parameters in extension config cause overlay caption distortion
+
+- Session: final
+- Suggested severity: LOW
+
+What I did: Dispatched a config update with an extreme font size value (e.g., fontSize: 200) via updateConfig message to extension/content.js.
+Expected: content.js validates and clamps fontSize within readable subtitle bounds (e.g., 12px - 72px, matching PyQt client validation).
+Actual: content.js applies textBg.style.fontSize = `${msg.fontSize}px` directly without bounds checking. Large font values cause the overlay box to swell beyond the viewport bounds, while small values make captions illegible.
+Screenshot: screenshots/adv-017.png
+
+Disposition: ACCEPTED -> DEF-045
+
+## ADV-018: RelayServer handle_client leaves client WebSocket open after remote STT connection failure
+
+- Session: final
+- Suggested severity: LOW
+
+What I did: Connected the Chrome extension to local RelayServer (ws://localhost:8765) while the remote STT server was offline or set to an invalid host (ws://invalid-host:9999).
+Expected: After max connection retries fail, RelayServer sends a close frame to the extension WebSocket to inform it of the failure.
+Actual: RelayServer.handle_client updates the UI status signal to Error connecting to STT server and returns from the function without explicitly calling await websocket.close(). The extension WebSocket is left in an unclosed state until function cleanup implicitly tears down the connection.
+
+Disposition: ACCEPTED -> DEF-046
