@@ -426,5 +426,30 @@ def test_stroked_label_rich_text_rendering(qapp):
     assert label.textFormat() == Qt.TextFormat.RichText
 
 
+@pytest.mark.asyncio
+async def test_def_046_relay_server_closes_client_ws_on_stt_failure():
+    """DEF-046: Verify RelayServer explicitly closes client WebSocket when remote STT fails."""
+    import websockets
+
+    relay_port = get_free_port()
+    unused_port = get_free_port()
+
+    relay = RelayServer(
+        host="127.0.0.1",
+        port=relay_port,
+        remote_url=f"ws://127.0.0.1:{unused_port}/transcribe",
+    )
+    await relay.start_server()
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{relay_port}") as client_ws:
+            await client_ws.send(json.dumps({"type": "config", "language": "es"}))
+            with pytest.raises(websockets.exceptions.ConnectionClosed):
+                await asyncio.wait_for(client_ws.recv(), timeout=5.0)
+    finally:
+        await relay.stop()
+
+
+
 
 

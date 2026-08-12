@@ -104,14 +104,15 @@ async def transcribe_websocket(websocket: WebSocket):
                         elif msg_cmd == "pong":
                             continue
 
-                        if "language" in config:
-                            language = config["language"]
-                        if "task" in config:
-                            task = config["task"]
-                        # Clear buffer on new configuration
-                        audio_buffer.clear()
-                        session_speaker_state.reset()
-                        logger.info(f"Updated config: language={language}, task={task}")
+                        new_language = config["language"] if "language" in config else language
+                        new_task = config["task"] if "task" in config else task
+                        if new_language != language or new_task != task:
+                            language = new_language
+                            task = new_task
+                            # Clear buffer and reset speaker state only on actual config changes
+                            audio_buffer.clear()
+                            session_speaker_state.reset()
+                            logger.info(f"Updated config: language={language}, task={task}")
                 except Exception as parse_err:
                     logger.warning(f"Failed to parse JSON config message: {parse_err}")
 
@@ -129,26 +130,46 @@ async def transcribe_websocket(websocket: WebSocket):
                 audio_buffer.extend(chunk)
 
                 # Drain pending binary chunks to catch up if CPU transcription is lagging
+                drain_disconnected = False
                 while True:
                     try:
                         next_msg = await asyncio.wait_for(websocket.receive(), timeout=0.001)
-                        if "bytes" in next_msg and next_msg["bytes"]:
+                        nxt_type = next_msg.get("type")
+                        if nxt_type == "websocket.disconnect":
+                            logger.info("Client disconnected.")
+                            drain_disconnected = True
+                            break
+                        elif "bytes" in next_msg and next_msg["bytes"]:
                             nxt_chunk = next_msg["bytes"]
                             if len(nxt_chunk) % 2 != 0:
                                 nxt_chunk = nxt_chunk[:-1]
                             audio_buffer.extend(nxt_chunk)
-                        elif "text" in next_msg:
-                            # If we hit a text/config message, put it back or ignore? 
-                            # Since we can't un-receive, we just skip it if it's a ping, or process it if config.
+                        elif "text" in next_msg and next_msg["text"]:
                             try:
-                                config = __import__("json").loads(next_msg["text"])
-                                if config.get("type") == "ping":
-                                    await websocket.send_json({"type": "pong"})
-                            except:
-                                pass
+                                config = json.loads(next_msg["text"])
+                                if isinstance(config, dict):
+                                    msg_cmd = config.get("type")
+                                    if msg_cmd == "ping":
+                                        await websocket.send_json({"type": "pong"})
+                                    elif msg_cmd != "pong":
+                                        new_language = config["language"] if "language" in config else language
+                                        new_task = config["task"] if "task" in config else task
+                                        if new_language != language or new_task != task:
+                                            language = new_language
+                                            task = new_task
+                                            audio_buffer.clear()
+                                            session_speaker_state.reset()
+                                            logger.info(f"Updated config: language={language}, task={task}")
+                            except Exception as parse_err:
+                                logger.warning(f"Failed to parse JSON config message in drain loop: {parse_err}")
                             break
-                    except __import__("asyncio").TimeoutError:
+                        else:
+                            break
+                    except asyncio.TimeoutError:
                         break
+
+                if drain_disconnected:
+                    break
 
                 # Maintain maximum buffer window (even byte aligned)
                 if len(audio_buffer) > max_bytes:

@@ -95,6 +95,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'stop') {
+    if (currentTabId !== null) {
+      chrome.tabs.sendMessage(currentTabId, { action: 'hideCaption' }).catch(() => {});
+    }
     isCapturing = false;
     currentTabId = null;
     chrome.runtime.sendMessage({ action: 'stopCapture' });
@@ -112,6 +115,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'captureStopped') {
+    if (currentTabId !== null) {
+      chrome.tabs.sendMessage(currentTabId, { action: 'hideCaption' }).catch(() => {});
+    }
     isCapturing = false;
     currentTabId = null;
     chrome.offscreen.hasDocument().then((hasDoc) => {
@@ -132,6 +138,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       start: message.start !== undefined ? message.start : null,
       end: message.end !== undefined ? message.end : null
     });
+    if (transcriptHistory.length > 1000) {
+      transcriptHistory.shift();
+    }
     if (currentTabId !== null) {
       if (chrome.storage && chrome.storage.local) {
         chrome.storage.local.get(['fontFamily', 'textColor', 'strokeThickness'], (settings) => {
@@ -158,6 +167,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 function cleanupCapture() {
+  if (currentTabId !== null) {
+    chrome.tabs.sendMessage(currentTabId, { action: 'hideCaption' }).catch(() => {});
+  }
   isCapturing = false;
   currentTabId = null;
   chrome.runtime.sendMessage({ action: 'stopCapture' }).catch(() => {});

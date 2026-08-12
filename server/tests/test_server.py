@@ -480,3 +480,97 @@ def test_cuda_load_failure_fallback_to_cpu():
         assert mock_whisper.call_count == 2
 
 
+def test_websocket_ui_config_preserves_speaker_and_buffer():
+    """
+    Test DEF-035 & DEF-042: UI config updates (e.g. fontSize) or identical language/task
+    do NOT clear audio buffer or reset speaker state, whereas changing language/task DOES reset state.
+    """
+    recorded_speaker_states = []
+
+    def mock_transcribe(audio, language=None, task="transcribe", speaker_state=None):
+        if speaker_state:
+            recorded_speaker_states.append({
+                "audio_processed": speaker_state.total_audio_processed,
+                "current_speaker": speaker_state.current_speaker
+            })
+            # Simulate total_audio_processed accumulation
+            speaker_state.total_audio_processed += len(audio) / 16000.0
+        return {"text": "hello", "start": 0.0, "end": 1.0}
+
+    with patch.object(stt_service, "transcribe", side_effect=mock_transcribe):
+        with client.websocket_connect("/transcribe") as websocket:
+            # 1. Initial config
+            websocket.send_json({"type": "config", "language": "en", "task": "transcribe"})
+            websocket.send_bytes(bytes(3200))  # 0.2s
+            websocket.receive_json()
+
+            # 2. UI config update only (fontSize: 18) - should NOT reset
+            websocket.send_json({"type": "config", "fontSize": 18})
+            websocket.send_bytes(bytes(3200))  # 0.2s
+            websocket.receive_json()
+
+            # 3. Same language config update - should NOT reset
+            websocket.send_json({"type": "config", "language": "en"})
+            websocket.send_bytes(bytes(3200))  # 0.2s
+            websocket.receive_json()
+
+            # 4. Actual language change (en -> es) - SHOULD reset speaker state
+            websocket.send_json({"type": "config", "language": "es"})
+            websocket.send_bytes(bytes(3200))  # 0.2s
+            websocket.receive_json()
+
+    assert len(recorded_speaker_states) == 4
+    # Call 1: initial (audio_processed = 0.0)
+    assert recorded_speaker_states[0]["audio_processed"] == 0.0
+    # Call 2: after 1st 0.1s chunk, audio_processed should be 0.1s (NOT reset by fontSize config)
+    assert pytest.approx(recorded_speaker_states[1]["audio_processed"], 0.01) == 0.1
+    # Call 3: after 2nd 0.1s chunk, audio_processed should be 0.2s (NOT reset by same language config)
+    assert pytest.approx(recorded_speaker_states[2]["audio_processed"], 0.01) == 0.2
+    # Call 4: after language change to 'es', speaker state was reset, so audio_processed reset back to 0.0
+    assert recorded_speaker_states[3]["audio_processed"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_websocket_drain_loop_disconnect_graceful():
+    """
+    Test DEF-039: Receiving websocket.disconnect during the receive drain loop
+    breaks out cleanly without raising Starlette RuntimeError.
+    """
+    import asyncio
+    from server.main import transcribe_websocket
+
+    mock_ws = MagicMock()
+
+    # Async mock for accept
+    async def mock_accept():
+        pass
+
+    mock_ws.accept = mock_accept
+
+    # Mock receive calls:
+    # 1. Binary chunk message (outer loop receive)
+    # 2. Disconnect message (drain loop receive)
+    # 3. Second disconnect message (if called again, raises RuntimeError like Starlette)
+    call_count = 0
+
+    async def mock_receive():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"type": "websocket.bytes", "bytes": bytes(3200)}
+        elif call_count == 2:
+            return {"type": "websocket.disconnect", "code": 1000}
+        else:
+            raise RuntimeError('Cannot call "receive" once a disconnect message has been received.')
+
+    mock_ws.receive = mock_receive
+
+    with patch("server.main.stt_service") as mock_stt:
+        mock_stt.transcribe.return_value = {"text": "test", "start": 0.0, "end": 0.2}
+        # Should complete cleanly without raising RuntimeError
+        await transcribe_websocket(mock_ws)
+
+    assert call_count == 2
+
+
+

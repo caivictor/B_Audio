@@ -9,6 +9,7 @@ let currentTask = 'transcribe';
 let currentServerUrl = 'ws://192.168.0.30:8000/transcribe';
 let isReconnecting = false;
 let reconnectAttempts = 0;
+let reconnectTimer = null;
 const MAX_RECONNECT_ATTEMPTS = 3;
 const TARGET_SAMPLE_RATE = 16000;
 const CHUNK_DURATION_SEC = 1.0;
@@ -153,6 +154,12 @@ function setupWebSocketHandlers() {
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      if (data && data.type === 'ping') {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        }
+        return;
+      }
       if (data && data.text !== undefined) {
         chrome.runtime.sendMessage({
           action: 'captionText',
@@ -181,7 +188,7 @@ function setupWebSocketHandlers() {
       reconnectAttempts++;
       isReconnecting = true;
       console.log(`Attempting WebSocket reconnect ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}...`);
-      setTimeout(() => {
+      reconnectTimer = setTimeout(() => {
         if (mediaStream) {
           ws = new WebSocket(currentServerUrl);
           setupWebSocketHandlers();
@@ -204,11 +211,17 @@ function sendPcmChunk() {
 }
 
 function stopCapture() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   if (ws) {
     ws.onclose = null;
     ws.onerror = null;
-    if (ws.readyState === WebSocket.OPEN) {
-      sendPcmChunk();
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      if (ws.readyState === WebSocket.OPEN) {
+        sendPcmChunk();
+      }
       ws.close();
     }
     ws = null;

@@ -293,3 +293,69 @@ def test_phase6_background_relays_options():
     assert "textColor" in bg_code
     assert "strokeThickness" in bg_code
 
+
+def test_def_034_stop_capture_closes_connecting_websocket():
+    """DEF-034: Verify offscreen.js stopCapture includes WebSocket.CONNECTING state."""
+    offscreen_code = Path("extension/offscreen.js").read_text(encoding="utf-8")
+    assert "ws.readyState === WebSocket.CONNECTING" in offscreen_code
+    assert "WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING" in offscreen_code
+
+
+def test_def_036_background_dispatches_hide_caption():
+    """DEF-036: Verify background.js dispatches hideCaption on stop and captureStopped."""
+    bg_code = Path("extension/background.js").read_text(encoding="utf-8")
+    assert "hideCaption" in bg_code
+    stop_idx = bg_code.find("message.action === 'stop'")
+    hide_caption_idx = bg_code.find("hideCaption", stop_idx)
+    assert hide_caption_idx != -1, "background.js must send hideCaption on stop"
+
+
+def test_def_037_038_040_content_parse_speaker_tags():
+    """DEF-037, DEF-038, DEF-040: Verify content.js parseSpeakerTags supports optional colon and wraps dialogue in span."""
+    content_code = Path("extension/content.js").read_text(encoding="utf-8")
+    assert "parseSpeakerTags" in content_code
+    assert "]:?" in content_code
+
+    import subprocess
+    cmd = [
+        "node", "-e",
+        """
+        function getSpeakerColor(label) { return '#ff9999'; }
+        """ + content_code[content_code.find("function parseSpeakerTags"):content_code.find("chrome.runtime.onMessage")] + """
+        console.log(parseSpeakerTags('[Speaker 1] Dialogue text without colon'));
+        console.log(parseSpeakerTags('[Speaker 2]: Dialogue text with colon'));
+        """
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    output = result.stdout.strip().split('\n')
+    
+    assert '<span style="color: #ff9999"><b>[Speaker 1]:</b> Dialogue text without colon</span>' in output[0]
+    assert '<span style="color: #ff9999"><b>[Speaker 2]:</b> Dialogue text with colon</span>' in output[1]
+
+
+def test_def_041_offscreen_clears_reconnect_timer():
+    """DEF-041: Verify offscreen.js saves setTimeout to reconnectTimer and clears it in stopCapture."""
+    offscreen_code = Path("extension/offscreen.js").read_text(encoding="utf-8")
+    assert "reconnectTimer" in offscreen_code
+    assert "clearTimeout(reconnectTimer)" in offscreen_code
+
+
+def test_def_043_background_transcript_history_bounded():
+    """DEF-043: Verify background.js caps transcriptHistory length."""
+    bg_code = Path("extension/background.js").read_text(encoding="utf-8")
+    assert "transcriptHistory.length > 1000" in bg_code
+
+
+def test_def_044_offscreen_handles_keepalive_ping():
+    """DEF-044: Verify offscreen.js responds to ping messages with pong."""
+    offscreen_code = Path("extension/offscreen.js").read_text(encoding="utf-8")
+    assert "data.type === 'ping'" in offscreen_code
+    assert "'pong'" in offscreen_code or '"pong"' in offscreen_code
+
+
+def test_def_045_content_clamps_font_size():
+    """DEF-045: Verify content.js clamps fontSize between 12 and 72."""
+    content_code = Path("extension/content.js").read_text(encoding="utf-8")
+    assert "Math.max(12, Math.min(72," in content_code
+
+

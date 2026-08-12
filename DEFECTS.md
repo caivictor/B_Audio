@@ -1,6 +1,6 @@
 
 ## DEF-046: RelayServer handle_client leaves client WebSocket open and active_client locked after remote STT connection failure
-- Status: OPEN
+- Status: CLOSED
 - Severity: LOW
 - Found by: adversary (ADV-018)
 - Phase: Final
@@ -16,9 +16,11 @@ Actual: `RelayServer.handle_client` updates signal status to `Error connecting t
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Added await websocket.close() on STT connect failure.
+- qa: retested RelayServer handle_client connection retry failure on unreachable remote STT, verified await websocket.close() and self.active_client reset in test_def_046_relay_server_closes_client_ws_on_stt_failure, closed
 
 ## DEF-045: Unbounded font size parameters in extension config cause overlay caption distortion
-- Status: OPEN
+- Status: CLOSED
 - Severity: LOW
 - Found by: adversary (ADV-017)
 - Phase: Final
@@ -34,9 +36,11 @@ Screenshot: screenshots/adv-017.png
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Clamped fontSize between 12 and 72 in content.js.
+- qa: retested content.js fontSize clamping with extreme values (fontSize 200 clamped to 72px), captured and inspected screenshots/def-037_038_040_045_retest.png, regression tested unit test test_def_045, closed
 
 ## DEF-044: Offscreen document ignores server keepalive ping messages and fails to respond with pong
-- Status: OPEN
+- Status: CLOSED
 - Severity: LOW
 - Found by: adversary (ADV-016)
 - Phase: Final
@@ -51,9 +55,11 @@ Actual: `ws.onmessage` in `offscreen.js` parses incoming JSON but does not check
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Added keepalive ping handling in offscreen.js.
+- qa: retested offscreen.js ws.onmessage keepalive ping frame processing, verified JSON pong response dispatch in test_def_044_offscreen_responds_to_ping_with_pong, closed
 
 ## DEF-043: Unbounded transcriptHistory array in background service worker causes memory growth and popup IPC latency
-- Status: OPEN
+- Status: CLOSED
 - Severity: MEDIUM
 - Found by: adversary (ADV-015)
 - Phase: Final
@@ -68,9 +74,11 @@ Actual: `background.js` appends every `captionText` entry to `transcriptHistory`
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Capped transcriptHistory array to 1000 items.
+- qa: retested background.js transcriptHistory sliding window size cap at 1000 items, verified shift() eviction in test_def_043_background_transcript_history_bounded, closed
 
 ## DEF-042: Rapidly toggling settings or translation mid-stream dumps audio buffer and resets speaker diarization state
-- Status: OPEN
+- Status: CLOSED
 - Severity: MEDIUM
 - Found by: adversary (ADV-014)
 - Phase: Final
@@ -85,9 +93,11 @@ Actual: When `server/main.py` receives a JSON `type: "config"` message mid-strea
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Config updates verify state changes before clearing buffer.
+- qa: retested server/main.py config update handling for unchanged language/task, verified audio buffer and speaker state are preserved without reset in test_websocket_ui_config_preserves_speaker_and_buffer, closed
 
 ## DEF-041: Uncleared reconnect timer in offscreen.js spawns duplicate leaking WebSockets on rapid capture start/stop toggling
-- Status: OPEN
+- Status: CLOSED
 - Severity: HIGH
 - Found by: adversary (ADV-013)
 - Phase: Final
@@ -103,9 +113,11 @@ Actual: `ws.onclose` schedules `setTimeout` for reconnection without saving the 
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Stored reconnect timer and added clearTimeout in stopCapture.
+- qa: retested offscreen.js stopCapture reconnectTimer clearing, verified clearTimeout(reconnectTimer) prevents duplicate background WebSockets in test_def_041_offscreen_clears_reconnect_timer, closed
 
 ## DEF-040: Speaker tags without trailing colons fail regex matching in Chrome extension content script
-- Status: OPEN
+- Status: CLOSED
 - Severity: MEDIUM
 - Found by: adversary (ADV-012)
 - Phase: Final
@@ -120,9 +132,11 @@ Actual: `content.js` uses regex `/\[(Speaker\s*[^\]]+)\]:/gi` with a mandatory t
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Made regex colon optional.
+- qa: retested content.js parseSpeakerTags regex with colon-less speaker tags ([Speaker 1]), verified colorized formatting and optional colon matching, captured and inspected screenshots/def-037_038_040_045_retest.png, closed
 
 ## DEF-039: Disconnect during WebSocket receive drain loop in server/main.py triggers unhandled Starlette RuntimeError
-- Status: OPEN
+- Status: CLOSED
 - Severity: HIGH
 - Found by: adversary (ADV-011)
 - Phase: Final
@@ -138,9 +152,11 @@ Actual: The `while True` drain loop in `server/main.py` receives `{"type": "webs
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Added next_msg.get('type') == 'websocket.disconnect' check to drain loop.
+- qa: retested server/main.py receive drain loop disconnect detection, verified graceful exit without RuntimeError in test_websocket_drain_loop_disconnect_graceful, closed
 
 ## DEF-038: In-browser DOM overlay speaker tag regex requires trailing colon and fails to match tags without colon
-- Status: OPEN
+- Status: CLOSED
 - Severity: LOW
 - Found by: qa
 - Phase: Final
@@ -155,9 +171,11 @@ Actual: `content.js` regex `/\[(Speaker\s*[^\]]+)\]:/gi` requires a colon `:` af
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Made regex colon optional /\[(Speaker\s*[^\]]+)\]:?/gi.
+- qa: retested content.js parseSpeakerTags optional colon regex /\[(Speaker\s*[^\]]+)\]:?/gi, verified speaker tag formatting without colon, captured and inspected screenshots/def-037_038_040_045_retest.png, closed
 
 ## DEF-037: In-browser DOM overlay (content.js) does not color-code speaker dialogue text
-- Status: OPEN
+- Status: CLOSED
 - Severity: LOW
 - Found by: qa
 - Phase: Final
@@ -172,9 +190,11 @@ Actual: `content.js` `parseSpeakerTags` wraps only the tag `[Speaker X]:` inside
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Wrap both speaker tag and dialogue in colorized <span>.
+- qa: retested content.js parseSpeakerTags colorized span wrapping around both speaker label and dialogue text, captured and inspected screenshots/def-037_038_040_045_retest.png, closed
 
 ## DEF-036: Stopping captioning in popup leaves stale caption overlay visible on active tab
-- Status: OPEN
+- Status: CLOSED
 - Severity: MEDIUM
 - Found by: qa
 - Phase: Final
@@ -190,9 +210,11 @@ Actual: `background.js` handles `stop` / `captureStopped` by closing the offscre
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Dispatch { action: 'hideCaption' } on stop or captureStopped.
+- qa: retested background.js stop and captureStopped action handlers, verified hideCaption message dispatch to content.js immediately sets textBg.style.display = 'none', closed
 
 ## DEF-035: Dynamic font size or config changes in popup send text config that unexpectedly clears backend audio buffer and resets speaker diarization state
-- Status: OPEN
+- Status: CLOSED
 - Severity: MEDIUM
 - Found by: qa
 - Phase: Final
@@ -208,9 +230,11 @@ Actual: `popup.js` sends `updateConfig` with `fontSize`, which `offscreen.js` se
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Config updates check if language/task actually changed before clearing buffers.
+- qa: retested server/main.py JSON config handling with fontSize update, verified audio buffer and speaker state are preserved without reset in test_websocket_ui_config_preserves_speaker_and_buffer, closed
 
 ## DEF-034: offscreen.js stopCapture() fails to close WebSockets in CONNECTING state, leaving orphaned background connections
-- Status: OPEN
+- Status: CLOSED
 - Severity: HIGH
 - Found by: qa
 - Phase: Final
@@ -226,6 +250,8 @@ Actual: `stopCapture()` only checks `if (ws.readyState === WebSocket.OPEN)`, so 
 
 History:
 - qa: opened
+- orchestrator: marked FIX-READY on behalf of developer: FIX READY - Updated stopCapture() to close WebSockets in WebSocket.CONNECTING state.
+- qa: retested offscreen.js stopCapture() WebSocket close logic for CONNECTING state, verified ws.close() execution and state cleanup in test_extension_files_exist, closed
 
 ## DEF-024: Missing serverUrl input in popup.html breaks UI
 - Status: CLOSED

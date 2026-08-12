@@ -145,17 +145,47 @@ if (!window.__webCaptionerInitialized) {
     // Escape HTML to prevent injection
     let safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     
-    const regex = /\[(Speaker\s*[^\]]+)\]:/gi;
-    safeText = safeText.replace(regex, (match, label) => {
+    const regex = /\[(Speaker\s*[^\]]+)\]:?/gi;
+    const matches = Array.from(safeText.matchAll(regex));
+
+    if (matches.length === 0) {
+      return safeText.replace(/\n/g, '<br>');
+    }
+
+    let result = '';
+    let lastIdx = 0;
+
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const label = match[1].trim();
+      const matchStart = match.index;
+      const matchEnd = matchStart + match[0].length;
+
+      let prefix = safeText.slice(lastIdx, matchStart);
+      if (i > 0) {
+        if (prefix && !prefix.trimEnd().endsWith('<br>') && !prefix.trimEnd().endsWith('\n')) {
+          prefix += '<br>';
+        } else if (!prefix) {
+          prefix = '<br>';
+        }
+      }
+      prefix = prefix.replace(/\n/g, '<br>');
+      result += prefix;
+
+      const nextStart = (i + 1 < matches.length) ? matches[i + 1].index : safeText.length;
+      let segmentText = safeText.slice(matchEnd, nextStart).replace(/\n/g, '<br>');
+
       const color = getSpeakerColor(label);
-      return `<br><span style="color: ${color}"><b>[${label}]:</b></span>`;
-    });
+      result += `<span style="color: ${color}"><b>[${label}]:</b>${segmentText}</span>`;
+
+      lastIdx = nextStart;
+    }
 
     // Clean up newlines so \n[Speaker X] doesn't cause <br><br> (ADV-019)
-    safeText = safeText.replace(/\n<br>/g, '<br>').replace(/<br>\n/g, '<br>').replace(/\n/g, '<br>');
+    result = result.replace(/\n<br>/g, '<br>').replace(/<br>\n/g, '<br>').replace(/\n/g, '<br>');
 
     // Remove leading <br> tags
-    return safeText.replace(/^(<br>)+/, '');
+    return result.replace(/^(<br>)+/, '');
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
@@ -163,7 +193,11 @@ if (!window.__webCaptionerInitialized) {
       if (msg.text) {
         textBg.innerHTML = parseSpeakerTags(msg.text);
         if (msg.fontSize) {
-          textBg.style.fontSize = `${msg.fontSize}px`;
+          const fontSizeNum = parseInt(msg.fontSize, 10);
+          if (!isNaN(fontSizeNum)) {
+            const clampedSize = Math.max(12, Math.min(72, fontSizeNum));
+            textBg.style.fontSize = `${clampedSize}px`;
+          }
         }
         if (msg.fontFamily || msg.textColor || msg.strokeThickness !== undefined) {
           applyCustomStyles(msg.fontFamily, msg.textColor, msg.strokeThickness);
